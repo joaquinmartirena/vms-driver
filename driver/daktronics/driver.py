@@ -12,14 +12,7 @@ from datetime import datetime
 from driver.base import VMSDriver
 from models.device import DeviceStatus, Message, MessageStatus, ControlMode, ShortErrorBit
 from snmp.client import SNMPClient
-from driver.daktronics.oids import (
-    COMMUNITY_READ, COMMUNITY_WRITE,
-    MEMORY_CHANGEABLE,
-    msg_multi_string, msg_status, msg_crc,
-    DMS_CONTROL_MODE, DMS_ACTIVATE_MESSAGE,
-    SHORT_ERROR_STATUS, DMS_STAT_DOOR_OPEN,
-    WATCHDOG_FAILURE_COUNT, DMS_ACTIVATE_MSG_ERROR,
-)
+from driver.daktronics.oids import *
 
 logger = logging.getLogger(__name__)
 
@@ -70,9 +63,8 @@ class DaktronicsVFCDriver(VMSDriver):
             return DeviceStatus(ip=self.ip, online=False, last_polled=datetime.now())
 
     def get_current_message(self) -> str:
-        """Lee el MULTI string del mensaje activo (currentBuffer = memory_type 4, slot 1)."""
         try:
-            value = self._read.get(msg_multi_string(4, 1))
+            value = self._read.get(msg_multi_string(MEMORY_CURRENT_BUFFER, 1))
             return str(value)
         except Exception as e:
             logger.warning(f"No se pudo leer mensaje activo en {self.ip}: {e}")

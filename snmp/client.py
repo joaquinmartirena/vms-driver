@@ -41,13 +41,23 @@ class SNMPClient:
         return varBinds[0][1]
 
     async def _set(self, oid: str, value):
+        # Convertir tipos Python a tipos SNMP explícitos
+        if isinstance(value, int):
+            snmp_value = Integer32(value)
+        elif isinstance(value, str):
+            snmp_value = OctetString(value)
+        elif isinstance(value, bytes):
+            snmp_value = OctetString(value)
+        else:
+            snmp_value = value  # ya es tipo SNMP (OctetString, etc.)
+
         snmpEngine = SnmpEngine()
         errorIndication, errorStatus, errorIndex, varBinds = await set_cmd(
             snmpEngine,
             CommunityData(self.community, mpModel=1),
             await UdpTransportTarget.create((self.ip, self.port), timeout=self.timeout, retries=self.retries),
             ContextData(),
-            ObjectType(ObjectIdentity(oid), value)
+            ObjectType(ObjectIdentity(oid), snmp_value)
         )
         snmpEngine.closeDispatcher()
 
@@ -76,6 +86,5 @@ class SNMPClient:
                 break
             for varBind in varBinds:
                 results.append((str(varBind[0]), varBind[1]))
-
         snmpEngine.closeDispatcher()
         return results
