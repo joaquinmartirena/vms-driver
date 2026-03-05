@@ -65,9 +65,12 @@ MAX_NUMBER_PAGES             = 6     # dmsMaxNumberPages confirmado
 COLOR_SCHEME                 = 4     # colorClassic confirmado
 
 # ─── Tipos de memoria (dmsMessageMemoryType) ──────────────────────────────────
-MEMORY_VOLATILE              = 1     # volátil  — se pierde al apagar
-MEMORY_CHANGEABLE            = 2     # changeable — persiste, sobrescribible ← usar por defecto
-MEMORY_PERMANENT             = 3     # permanente — mensajes de fábrica
+MEMORY_PERMANENT      = 2   # permanent — mensajes de fábrica, solo lectura
+MEMORY_CHANGEABLE     = 3   # changeable — persiste, sobrescribible ← usar por defecto
+MEMORY_VOLATILE       = 4   # volatile — se pierde al apagar
+MEMORY_CURRENT_BUFFER = 5   # currentBuffer — mensaje activo en pantalla
+MEMORY_SCHEDULE       = 6   # schedule — mensajes programados
+MEMORY_BLANK          = 7   # blank — apaga el panel
 
 # ─── Tabla de mensajes ────────────────────────────────────────────────────────
 MSG_SLOTS_PER_MEMORY_TYPE    = 500   # slots por tipo de memoria confirmado
