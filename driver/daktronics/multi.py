@@ -173,33 +173,46 @@ class MultiValidator:
     se realizan en el driver antes de llamar send_message().
     """
 
+    def __init__(
+        self,
+        width: int = 144,
+        height: int = 96,
+        max_string_length: int = 1500,
+        max_pages: int = 6,
+    ):
+        self.width = width
+        self.height = height
+        self.max_string_length = max_string_length
+        self.max_pages = max_pages
+
     def validate(self, multi: str) -> ValidationResult:
         """
         Valida un MULTI string completo.
 
         Chequeos:
             1. No vacío
-            2. Longitud dentro del límite (1500 bytes)
-            3. No supera máximo de páginas (6)
+            2. Longitud dentro del límite
+            3. No supera máximo de páginas
             4. Solo tags confirmados por dmsSupportedMultiTags = FF FF FF 3F
             5. Números de fuente en rango 1-255
             6. Números de gráfico en rango 1-255
+            7. Coordenadas de [tr] y [cr] dentro de las dimensiones del panel
         """
         errors = []
 
         if not multi or not multi.strip():
             return ValidationResult(valid=False, errors=["MULTI string vacío"])
 
-        if len(multi) > MAX_MULTI_STRING_LENGTH:
+        if len(multi) > self.max_string_length:
             errors.append(
                 f"MULTI string demasiado largo: {len(multi)} bytes "
-                f"(máximo {MAX_MULTI_STRING_LENGTH})"
+                f"(máximo {self.max_string_length})"
             )
 
         page_count = len(re.split(r"\[np\]", multi, flags=re.IGNORECASE))
-        if page_count > MAX_NUMBER_PAGES:
+        if page_count > self.max_pages:
             errors.append(
-                f"Demasiadas páginas: {page_count} (máximo {MAX_NUMBER_PAGES})"
+                f"Demasiadas páginas: {page_count} (máximo {self.max_pages})"
             )
 
         for tag in _ANY_TAG_RE.findall(multi):
@@ -215,6 +228,28 @@ class MultiValidator:
             n = int(match.group(1))
             if n < 1 or n > 255:
                 errors.append(f"Número de gráfico inválido: {n} (rango 1-255)")
+
+        for match in re.finditer(r"\[tr(\d+),(\d+),(\d+),(\d+)\]", multi, re.IGNORECASE):
+            x, y, w, h = int(match.group(1)), int(match.group(2)), int(match.group(3)), int(match.group(4))
+            if x + w > self.width:
+                errors.append(
+                    f"[tr] desborda el ancho del panel: x={x} + w={w} = {x+w} > {self.width}"
+                )
+            if y + h > self.height:
+                errors.append(
+                    f"[tr] desborda el alto del panel: y={y} + h={h} = {y+h} > {self.height}"
+                )
+
+        for match in re.finditer(r"\[cr(\d+),(\d+),(\d+),(\d+),\d{1,3},\d{1,3},\d{1,3}\]", multi, re.IGNORECASE):
+            x, y, w, h = int(match.group(1)), int(match.group(2)), int(match.group(3)), int(match.group(4))
+            if x + w > self.width:
+                errors.append(
+                    f"[cr] desborda el ancho del panel: x={x} + w={w} = {x+w} > {self.width}"
+                )
+            if y + h > self.height:
+                errors.append(
+                    f"[cr] desborda el alto del panel: y={y} + h={h} = {y+h} > {self.height}"
+                )
 
         return ValidationResult(valid=len(errors) == 0, errors=errors)
 
@@ -316,3 +351,45 @@ class MultiBuilder:
     def build_unsafe(self) -> str:
         """Construye sin validar — solo para tests."""
         return "".join(self._parts)
+    
+    def text_rect(self, x: int, y: int, w: int, h: int) -> "MultiBuilder":
+        """[trX,Y,W,H] — define zona de texto."""
+        self._parts.append(f"[tr{x},{y},{w},{h}]")
+        return self
+
+    def color_rect(self, x: int, y: int, w: int, h: int, r: int, g: int, b: int) -> "MultiBuilder":
+        """[crX,Y,W,H,R,G,B] — rectángulo de color."""
+        self._parts.append(f"[cr{x},{y},{w},{h},{r},{g},{b}]")
+        return self
+
+    def page_background(self, r: int, g: int, b: int) -> "MultiBuilder":
+        """[pbR,G,B] — color de fondo de página."""
+        self._parts.append(f"[pb{r},{g},{b}]")
+        return self
+
+    def flash(self, on_tenths: int, off_tenths: int) -> "MultiBuilder":
+        """[fltXoY] — inicia flash con tiempos en décimas de segundo."""
+        self._parts.append(f"[flt{on_tenths}o{off_tenths}]")
+        return self
+
+    def flash_end(self) -> "MultiBuilder":
+        """[/fl] — termina zona de flash."""
+        self._parts.append("[/fl]")
+        return self
+
+    def field(self, n: int) -> "MultiBuilder":
+        """[fN] — campo dinámico (n = 1..12)."""
+        if n < 1 or n > 12:
+            raise ValueError(f"Número de campo inválido: {n} (rango 1-12)")
+        self._parts.append(f"[f{n}]")
+        return self
+
+    def char_spacing(self, n: int) -> "MultiBuilder":
+        """[scN] — espaciado entre caracteres."""
+        self._parts.append(f"[sc{n}]")
+        return self
+
+    def line_spacing(self, n: int) -> "MultiBuilder":
+        """[slN] — espaciado entre líneas."""
+        self._parts.append(f"[sl{n}]")
+        return self

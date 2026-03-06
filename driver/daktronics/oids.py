@@ -6,6 +6,8 @@ Los OIDs NTCIP 1203 se importan desde snmp.ntcip1203.
 Dispositivo: Daktronics VFC — panel full-matrix 144×96 px, SNMP v2c
 """
 
+import os
+
 # Re-exportar OIDs estándar para que los módulos del driver puedan importar
 # todo desde un único lugar.
 from snmp.ntcip1203 import (  # noqa: F401
@@ -45,8 +47,8 @@ from snmp.ntcip1203 import (  # noqa: F401
 )
 
 # ─── Acceso SNMP ──────────────────────────────────────────────────────────────
-COMMUNITY_READ               = "public"
-COMMUNITY_WRITE              = "administrator"
+COMMUNITY_READ  = os.getenv("VMS_COMMUNITY_READ",  "public")
+COMMUNITY_WRITE = os.getenv("VMS_COMMUNITY_WRITE", "administrator")
 
 # ─── Dimensiones del panel (confirmadas en dispositivo) ───────────────────────
 SIGN_WIDTH_PIXELS            = 144   # vmsSignWidthPixels  confirmado: 144 px
@@ -65,9 +67,9 @@ MAX_NUMBER_PAGES             = 6     # dmsMaxNumberPages confirmado
 COLOR_SCHEME                 = 4     # colorClassic confirmado
 
 # ─── Tipos de memoria (dmsMessageMemoryType) ──────────────────────────────────
-MEMORY_PERMANENT      = 2   # permanent — mensajes de fábrica, solo lectura
-MEMORY_CHANGEABLE     = 3   # changeable — persiste, sobrescribible ← usar por defecto
-MEMORY_VOLATILE       = 4   # volatile — se pierde al apagar
+MEMORY_PERMANENT      = 2   # permanent  (NTCIP 1203) — solo lectura
+MEMORY_CHANGEABLE     = 3   # changeable (NTCIP 1203) — persiste, sobrescribible ← usar por defecto
+MEMORY_VOLATILE       = 4   # volatile   (NTCIP 1203) — se pierde al apagar
 MEMORY_CURRENT_BUFFER = 5   # currentBuffer — mensaje activo en pantalla
 MEMORY_SCHEDULE       = 6   # schedule — mensajes programados
 MEMORY_BLANK          = 7   # blank — apaga el panel

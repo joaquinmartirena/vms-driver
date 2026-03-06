@@ -1,6 +1,6 @@
 """
-Test de integración contra el Daktronics VFC real.
-IP: 66.17.99.157
+Test de integración contra el Daktronics VFC real o simulador.
+IP leída de la variable de entorno VMS_PANEL_IP (default: 66.17.99.157).
 """
 import sys
 import os
@@ -12,7 +12,7 @@ logging.basicConfig(level=logging.DEBUG)
 from driver.daktronics.driver import DaktronicsVFCDriver
 from models.device import MessageStatus
 
-IP = "66.17.99.157"
+IP = os.getenv("VMS_PANEL_IP", "66.17.99.157")
 
 def test_get_status():
     print("\n=== Test: get_status ===")
@@ -44,8 +44,7 @@ def test_send_message():
 
     result = driver.send_message(
         multi_string="[jl3]TEST[np][jl3]DRIVER",
-        slot=1,
-        priority=3
+        priority=3,
     )
 
     print(f"Memory type: {result.memory_type}")
@@ -57,9 +56,18 @@ def test_send_message():
     assert result.status == MessageStatus.VALID
     print("OK")
 
+def test_clear_message():
+    print("\n=== Test: clear_message ===")
+    driver = DaktronicsVFCDriver(ip=IP)
+    result = driver.clear_message()
+    print(f"Resultado: {result}")
+    assert result == True
+    print("OK")
+
 
 if __name__ == "__main__":
     print("=== Integration Tests — Daktronics VFC ===\n")
     test_get_status()
     test_get_current_message()
     test_send_message()
+    test_clear_message()
