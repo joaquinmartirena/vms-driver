@@ -87,6 +87,10 @@ class NTCIPDriver(VMSDriver):
         self._slots     = SlotManager(total_slots=self._discover_slot_count())
         self._validator = self._init_validator()
 
+    def _get_activate_priority(self) -> int:
+        """Priority para dmsActivateMessage. Sobreescribir en subclases si es necesario."""
+        return 3
+
     def _detect_source_ip(self) -> str:
         """Detecta la IP de la interfaz con ruta al panel, sin enviar tráfico."""
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
@@ -282,7 +286,7 @@ class NTCIPDriver(VMSDriver):
                 memory_type=memory_type,
                 slot=slot,
                 crc=crc,
-                priority=priority,
+                priority=self._get_activate_priority(),
             )
             self._write.set(DMS_ACTIVATE_MESSAGE, activate_hex)
             logger.info("mensaje activado",
@@ -335,7 +339,7 @@ class NTCIPDriver(VMSDriver):
         try:
             blank_hex = self._build_activate_hex(
                 memory_type=MEMORY_BLANK, slot=1, crc=0,
-                priority=_BLANK_MESSAGE_PRIORITY,
+                priority=self._get_activate_priority(),
             )
             self._write.set(DMS_ACTIVATE_MESSAGE, blank_hex)
             logger.info("panel blankeado", extra={"ip": self.ip})
