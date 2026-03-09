@@ -77,9 +77,10 @@ def clear_screen():
     os.system('clear')
 
 
-def print_header(ip: str):
+def print_header(ip: str, device_type: str = ""):
+    label = f"VMS Message Playground — {device_type}" if device_type else "VMS Message Playground"
     print("╔══════════════════════════════════════════════════════╗")
-    print("║        VMS Message Playground — Daktronics VFC       ║")
+    print(f"║{label:^54}║")
     print(f"║{ip:^54}║")
     print("╚══════════════════════════════════════════════════════╝")
     print()
@@ -308,7 +309,7 @@ def ask_rect(rect_num: int, device_info: DeviceInfo) -> str:
 def build_message(driver: VMSDriver, device_info: DeviceInfo) -> str | None:
     """Guia al usuario para construir un mensaje MULTI completo."""
     clear_screen()
-    print_header(device_info.ip)
+    print_header(device_info.ip, device_info.device_type)
     print("─── Nuevo mensaje ──────────────────────────────────────\n")
 
     # Modo de posicionamiento
@@ -493,7 +494,7 @@ def delete_message_menu(driver: VMSDriver):
 def main_menu(driver: VMSDriver, device_info: DeviceInfo):
     while True:
         clear_screen()
-        print_header(device_info.ip)
+        print_header(device_info.ip, device_info.device_type)
 
         # Estado actual
         try:
@@ -589,4 +590,6 @@ if __name__ == "__main__":
         device_type=os.getenv("VMS_DEVICE_TYPE", "daktronics_vfc"),
     )
     driver = create_driver(device_info)
+    device_info.width_pixels  = driver._validator.width
+    device_info.height_pixels = driver._validator.height
     main_menu(driver, device_info)
