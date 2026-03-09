@@ -7,7 +7,7 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import logging
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.DEBUG, stream=sys.stdout)
 
 from driver.fixalia.driver import FixaliaDriver
 from models.device import MessageStatus
@@ -51,20 +51,21 @@ def test_get_current_message():
 def test_send_message():
     print("\n=== Test: send_message ===")
     driver = FixaliaDriver(ip=IP)
-
-    result = driver.send_message(
-        multi_string="[jl3]HOLA[np][jl3]FIXALIA",
-        priority=3,
-    )
-
-    print(f"Memory type: {result.memory_type}")
-    print(f"Slot:        {result.slot}")
-    print(f"MULTI:       {result.multi_string}")
-    print(f"Status:      {result.status}")
-    print(f"CRC:         {result.crc}")
-
-    assert result.status == MessageStatus.VALID
-    print("OK")
+    try:
+        print("  [1] Llamando send_message...")
+        result = driver.send_message("[jl3]HOLA[np][jl3]FIXALIA")
+        print(f"  [2] Memory type: {result.memory_type}")
+        print(f"  [2] Slot:        {result.slot}")
+        print(f"  [2] MULTI:       {result.multi_string}")
+        print(f"  [2] Status:      {result.status}")
+        print(f"  [2] CRC:         {result.crc}")
+        assert result.status == MessageStatus.VALID
+        print("OK")
+    except Exception as e:
+        import traceback
+        print(f"  ERROR: {e}")
+        traceback.print_exc(file=sys.stdout)
+        raise
 
 
 def test_get_messages():
