@@ -141,7 +141,7 @@ class Message:
     Representa un mensaje en la dmsMessageTable del panel.
     Identifica el slot por (memory_type, slot) y lleva el contenido MULTI.
 
-    Tipos de memoria confirmados en VFC real (quirk: valores invertidos respecto al estándar):
+    Tipos de memoria (NTCIP 1203 — el VFC los respeta):
         3 = changeable — persiste, sobrescribible  ← usar por defecto (MEMORY_CHANGEABLE)
         4 = volatile   — se pierde al apagar
         5 = currentBuffer — mensaje activo en pantalla (solo lectura)

@@ -12,7 +12,7 @@ from datetime import datetime
 from pysnmp.hlapi.v3arch.asyncio import OctetString
 
 from driver.base import VMSDriver
-from driver.daktronics.multi import MultiValidator
+from driver.multi import MultiValidator
 from driver.daktronics.slots import SlotManager
 from models.device import DeviceStatus, Message, MessageStatus, ControlMode, ShortErrorBit
 from snmp.client import SNMPClient
