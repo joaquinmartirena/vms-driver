@@ -1,9 +1,9 @@
 """
-Valores y constantes para Daktronics VFC
-Contiene únicamente valores confirmados contra el dispositivo real
-(IP 66.17.99.157) y constantes que extienden el estándar.
+Valores y constantes para Fixalia.
+Contiene únicamente valores confirmados contra el simulador (IP 127.0.0.1)
+y constantes que extienden el estándar.
 Los OIDs NTCIP 1203 se importan desde snmp.ntcip1203.
-Dispositivo: Daktronics VFC — panel full-matrix 144×96 px, SNMP v2c
+Dispositivo: Fixalia — panel full-matrix 320×64 px, SNMP v2c
 """
 
 import os
@@ -46,11 +46,11 @@ from snmp.ntcip1203 import (  # noqa: F401
     msg_multi_string, msg_owner, msg_crc, msg_run_time_priority, msg_status,
 )
 
-# ─── Acceso SNMP ──────────────────────────────────────────────────────────────
+# ─── Acceso SNMP (12-factor III) ──────────────────────────────────────────────
 COMMUNITY_READ  = os.getenv("VMS_COMMUNITY_READ",  "public")
 COMMUNITY_WRITE = os.getenv("VMS_COMMUNITY_WRITE", "administrator")
 
-# ─── Parámetros SNMP (12-factor III) ──────────────────────────────────────────
+# ─── Parámetros SNMP ──────────────────────────────────────────────────────────
 SNMP_PORT    = int(os.getenv("VMS_SNMP_PORT",    "161"))
 SNMP_TIMEOUT = int(os.getenv("VMS_SNMP_TIMEOUT", "10"))
 SNMP_RETRIES = int(os.getenv("VMS_SNMP_RETRIES", "3"))
@@ -60,20 +60,9 @@ VALIDATE_TIMEOUT  = float(os.getenv("VMS_VALIDATE_TIMEOUT",  "10"))
 VALIDATE_INTERVAL = float(os.getenv("VMS_VALIDATE_INTERVAL", "0.5"))
 
 # ─── Constantes de referencia — solo documentación, NO usar como fallback ─────
-SIGN_WIDTH_PIXELS            = 144   # vmsSignWidthPixels  confirmado: 144 px
-SIGN_HEIGHT_PIXELS           = 96    # vmsSignHeightPixels confirmado: 96 px
-
-# ─── Defaults MULTI confirmados (leídos del dispositivo) ──────────────────────
-DEFAULT_FONT                 = 24    # defaultFont confirmado: fuente 24
-DEFAULT_JUSTIFICATION_LINE   = 3     # 3 = center
-DEFAULT_JUSTIFICATION_PAGE   = 3     # 3 = middle
-DEFAULT_PAGE_ON_TIME         = 30    # 30 décimas = 3.0 s
-DEFAULT_FOREGROUND_RGB       = (0xFF, 0xB4, 0x00)  # ámbar confirmado: FF B4 00
-
-# ─── Capacidades del dispositivo (confirmadas) ────────────────────────────────
-MAX_MULTI_STRING_LEN         = 1500  # dmsMaxMultiStringLength confirmado
-MAX_NUMBER_PAGES             = 6     # dmsMaxNumberPages confirmado
-COLOR_SCHEME                 = 4     # colorClassic confirmado
+SIGN_WIDTH_PIXELS         = 320   # vmsSignWidthPixels  confirmado en simulador
+SIGN_HEIGHT_PIXELS        = 64    # vmsSignHeightPixels confirmado en simulador
+MSG_SLOTS_PER_MEMORY_TYPE = 100   # conservador — se lee de DMS_MAX_CHANGEABLE_MSG
 
 # ─── Tipos de memoria (dmsMessageMemoryType) ──────────────────────────────────
 MEMORY_PERMANENT      = 2   # permanent  (NTCIP 1203) — solo lectura
@@ -82,6 +71,3 @@ MEMORY_VOLATILE       = 4   # volatile   (NTCIP 1203) — se pierde al apagar
 MEMORY_CURRENT_BUFFER = 5   # currentBuffer — mensaje activo en pantalla
 MEMORY_SCHEDULE       = 6   # schedule — mensajes programados
 MEMORY_BLANK          = 7   # blank — apaga el panel
-
-# ─── Tabla de mensajes ────────────────────────────────────────────────────────
-MSG_SLOTS_PER_MEMORY_TYPE    = 500   # slots por tipo de memoria confirmado

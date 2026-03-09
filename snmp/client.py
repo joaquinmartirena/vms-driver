@@ -79,10 +79,10 @@ class SNMPClient:
             ObjectType(ObjectIdentity(oid))
         ):
             if errorIndication:
-                logger.warning(f"Walk error: {errorIndication}")
+                logger.warning("walk error", extra={"oid": oid, "error": str(errorIndication)})
                 break
             if errorStatus:
-                logger.warning(f"Walk status error: {errorStatus.prettyPrint()}")
+                logger.warning("walk status error", extra={"oid": oid, "error": errorStatus.prettyPrint()})
                 break
             for varBind in varBinds:
                 results.append((str(varBind[0]), varBind[1]))

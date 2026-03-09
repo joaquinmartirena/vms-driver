@@ -20,6 +20,15 @@ class VMSDriver(ABC):
     """
 
     @abstractmethod
+    def ping(self) -> bool:
+        """
+        Verifica que el panel responde vía SNMP.
+        Más liviano que get_status() — solo lee un OID (sysDescr).
+        Devuelve True si responde, False si no.
+        """
+        ...
+
+    @abstractmethod
     def get_status(self) -> DeviceStatus:
         """Lee el estado actual del panel."""
         ...

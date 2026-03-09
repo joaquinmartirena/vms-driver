@@ -18,6 +18,7 @@ from driver.base import VMSDriver
 # dependencias de todos los fabricantes en cada arranque.
 _REGISTRY: dict[str, str] = {
     "daktronics_vfc": "driver.daktronics.driver.DaktronicsVFCDriver",
+    "fixalia":        "driver.fixalia.driver.FixaliaDriver",
 }
 
 
