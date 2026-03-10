@@ -143,11 +143,17 @@ class MultiValidator:
         height: int = 96,
         max_string_length: int = MAX_MULTI_STRING_LENGTH,
         max_pages: int = MAX_NUMBER_PAGES,
+        supported_tags: set[str] | None = None,
     ):
         self.width = width
         self.height = height
         self.max_string_length = max_string_length
         self.max_pages = max_pages
+        self._supported_tags: set[str] | None = supported_tags
+
+    def set_supported_tags(self, tags: set[str]) -> None:
+        """Actualiza la lista de tags soportados por el panel."""
+        self._supported_tags = tags
 
     def validate(self, multi: str) -> ValidationResult:
         """
@@ -181,6 +187,16 @@ class MultiValidator:
         for tag in _ANY_TAG_RE.findall(multi):
             if not _VALID_TAG_RE.fullmatch(tag):
                 errors.append(f"Tag MULTI no soportado o mal formado: '{tag}'")
+
+        if self._supported_tags is not None:
+            used = {re.match(r'\[/?([a-zA-Z]+)', t).group(1).lower()
+                    for t in _ANY_TAG_RE.findall(multi)
+                    if re.match(r'\[/?([a-zA-Z]+)', t)}
+            unsupported = used - self._supported_tags
+            if unsupported:
+                errors.append(
+                    f"Tags no soportados por este panel: {', '.join(f'[{t}]' for t in sorted(unsupported))}"
+                )
 
         for match in re.finditer(r"\[fo(\d{1,3})(?:,[0-9A-Fa-f]{4})?\]", multi, re.IGNORECASE):
             n = int(match.group(1))

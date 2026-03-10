@@ -28,7 +28,7 @@ from snmp.ntcip1203 import (
     SYS_DESCR,
     DMS_MAX_CHANGEABLE_MSG,
     VMS_SIGN_WIDTH_PIXELS, VMS_SIGN_HEIGHT_PIXELS,
-    MULTI_MAX_MULTI_STRING_LENGTH, MULTI_MAX_NUMBER_PAGES,
+    MULTI_MAX_MULTI_STRING_LENGTH, MULTI_MAX_NUMBER_PAGES, MULTI_SUPPORTED_MULTI_TAGS,
     DMS_ACTIVATE_MESSAGE,
     DMS_CONTROL_MODE,
     SHORT_ERROR_STATUS, DMS_STAT_DOOR_OPEN, WATCHDOG_FAILURE_COUNT,
@@ -73,11 +73,11 @@ class NTCIPDriver(VMSDriver):
         self.ip   = ip
         self.port = port
         self._read  = SNMPClient(ip=ip, community=_COMMUNITY_READ,
-                                 port=self.port, timeout=_SNMP_TIMEOUT,
-                                 retries=_SNMP_RETRIES)
+                                port=self.port, timeout=_SNMP_TIMEOUT,
+                                retries=_SNMP_RETRIES)
         self._write = SNMPClient(ip=ip, community=_COMMUNITY_WRITE,
-                                 port=self.port, timeout=_SNMP_TIMEOUT,
-                                 retries=_SNMP_RETRIES)
+                                port=self.port, timeout=_SNMP_TIMEOUT,
+                                retries=_SNMP_RETRIES)
         self._source_ip_override = source_ip
         self._init()
 
@@ -86,6 +86,54 @@ class NTCIPDriver(VMSDriver):
         self._source_ip = self._source_ip_override or self._detect_source_ip()
         self._slots     = SlotManager(total_slots=self._discover_slot_count())
         self._validator = self._init_validator()
+        discovered = self._discover_supported_tags()
+        self._supported_tags = discovered if discovered is not None else self._get_supported_tags_fallback()
+        self._validator.set_supported_tags(self._supported_tags)
+        logger.debug("tags soportados", extra={"ip": self.ip, "tags": sorted(self._supported_tags)})
+
+    def _discover_supported_tags(self) -> set[str] | None:
+        """
+        Intenta leer dmsSupportedMultiTags del panel y decodifica el bitmask.
+        Devuelve None si el panel no implementa el OID (usa fallback).
+        """
+        try:
+            bitmask = int(self._read.get(MULTI_SUPPORTED_MULTI_TAGS))
+            return self._decode_supported_tags_bitmask(bitmask)
+        except Exception:
+            return None
+
+    def _decode_supported_tags_bitmask(self, bitmask: int) -> set[str]:
+        """Decodifica el bitmask NTCIP 1203 v03 de dmsSupportedMultiTags."""
+        BIT_TAG_MAP = {
+            0:  "cb",   # color background
+            1:  "cf",   # color foreground
+            2:  "fl",   # flashing
+            3:  "fo",   # font
+            4:  "g",    # graphic
+            5:  "hc",   # hex char
+            6:  "jl",   # justification line
+            7:  "jp",   # justification page
+            8:  "ms",   # manufacturer specific
+            9:  "mv",   # moving text
+            10: "nl",   # new line
+            11: "np",   # new page
+            12: "pt",   # page time
+            13: "sc",   # spacing char
+            14: "f",    # dynamic field
+            15: "pb",   # page background
+            16: "sr",   # speed range
+            17: "tr",   # text rectangle
+            18: "cr",   # color rectangle
+            19: "sl",   # line spacing
+        }
+        return {tag for bit, tag in BIT_TAG_MAP.items() if bitmask & (1 << bit)}
+
+    def _get_supported_tags_fallback(self) -> set[str]:
+        """
+        Tags safe por defecto cuando el panel no implementa dmsSupportedMultiTags.
+        Sobreescribir en subclases para ajustar al fabricante.
+        """
+        return {"jl", "jp", "nl", "np", "pt", "cf", "cb", "pb", "sc", "tr", "fo", "g", "fl", "hc", "f", "mv", "cr", "sl"}
 
     def _get_activate_priority(self) -> int:
         """Priority para dmsActivateMessage. Sobreescribir en subclases si es necesario."""
@@ -169,7 +217,7 @@ class NTCIPDriver(VMSDriver):
             return str(value)
         except Exception as e:
             logger.warning("no se pudo leer mensaje activo",
-                           extra={"ip": self.ip, "error": str(e)})
+                            extra={"ip": self.ip, "error": str(e)})
             return ""
 
     def get_message(self, slot: int, memory_type: int = MEMORY_CHANGEABLE) -> Message | None:
@@ -197,8 +245,8 @@ class NTCIPDriver(VMSDriver):
 
         except Exception as e:
             logger.warning("error leyendo slot",
-                           extra={"ip": self.ip, "slot": slot,
-                                  "memory_type": memory_type, "error": str(e)})
+                            extra={"ip": self.ip, "slot": slot,
+                            "memory_type": memory_type, "error": str(e)})
             return None
 
     def get_messages(self, memory_type: int = MEMORY_CHANGEABLE) -> list[Message]:

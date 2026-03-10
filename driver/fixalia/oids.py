@@ -67,6 +67,10 @@ MSG_SLOTS_PER_MEMORY_TYPE = 100   # conservador — se lee de DMS_MAX_CHANGEABLE
 # ─── Activación de mensajes ───────────────────────────────────────────────────
 ACTIVATE_MESSAGE_PRIORITY = 0xFF  # confirmado contra simulador Fixalia
 
+# ─── Tags MULTI soportados (fallback cuando dmsSupportedMultiTags da genErr) ──
+# Confirmado experimentalmente: [fo] y [f] NO funcionan en simulador Fixalia
+SUPPORTED_TAGS_FALLBACK: set[str] = {"jl", "jp", "nl", "np", "pt", "cf", "cb", "pb", "sc", "tr", "g", "mv", "cr", "sl", "fl", "hc"}
+
 # ─── Tipos de memoria (dmsMessageMemoryType) ──────────────────────────────────
 MEMORY_PERMANENT      = 2   # permanent  (NTCIP 1203) — solo lectura
 MEMORY_CHANGEABLE     = 3   # changeable (NTCIP 1203) — persiste, sobrescribible ← usar por defecto

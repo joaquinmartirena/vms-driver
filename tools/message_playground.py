@@ -503,8 +503,10 @@ def main_menu(driver: VMSDriver, device_info: DeviceInfo):
             online_str = "Online" if status.online else "Offline"
             errors_str = f"Errores: {status.active_errors()}" if status.has_errors else "Sin errores"
             msg_str = current if current else "(vacio)"
+            tags_str = " ".join(f"[{t}]" for t in sorted(driver._supported_tags))
             print(f"  Estado:  {online_str} | {errors_str}")
             print(f"  Mensaje: {msg_str}")
+            print(f"  Tags:    {tags_str}")
         except Exception as e:
             print(f"  * Error leyendo estado: {e}")
 
@@ -533,13 +535,10 @@ def main_menu(driver: VMSDriver, device_info: DeviceInfo):
 
         elif opcion == "2":
             print()
+            print(f"  Tags disponibles: {' '.join(f'[{t}]' for t in sorted(driver._supported_tags))}")
             multi = input("  MULTI string: ").strip()
             if multi:
-                validator = MultiValidator(
-                    width=device_info.width_pixels,
-                    height=device_info.height_pixels,
-                )
-                vr = validator.validate(multi)
+                vr = driver._validator.validate(multi)
                 if not vr:
                     print(f"  * MULTI invalido: {vr}")
                 else:
