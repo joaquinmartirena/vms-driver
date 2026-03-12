@@ -131,3 +131,49 @@ def msg_run_time_priority(memory_type: int, slot: int) -> str:
 def msg_status(memory_type: int, slot: int) -> str:
     """OID de dmsMessageStatus para (memory_type, slot)."""
     return f"{DMS_MSG_STATUS}.{memory_type}.{slot}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# dmsGraphic (dms.10) — Tabla de gráficos
+#
+# dmsGraphicTable  (dms.10.6.1.X.slot):
+#   col  2 = dmsGraphicNumber    — número de gráfico almacenado en el slot
+#   col  4 = dmsGraphicHeight    — alto en píxeles
+#   col  5 = dmsGraphicWidth     — ancho en píxeles
+#   col  6 = dmsGraphicType      — tipo de color (1=mono1bit, 2=mono8bit, 4=color24bit)
+#   col 10 = dmsGraphicStatus    — estado (7=modifyReq, 8=readyForUseReq)
+#
+# dmsGraphicBitmapTable (dms.10.7.1.3.slot.block):
+#   col  3 = dmsGraphicBlockData — datos del bloque (OctetString, 1-based)
+# ═══════════════════════════════════════════════════════════════════════════════
+DMS_NUM_GRAPHICS       = f"{_BASE}.10.1.0"  # dmsNumGraphics      — cantidad de slots de gráficos disponibles
+DMS_GRAPHIC_MAX_SIZE   = f"{_BASE}.10.2.0"  # dmsGraphicMaxSize   — tamaño máximo de un gráfico en bytes
+DMS_GRAPHIC_BLOCK_SIZE = f"{_BASE}.10.3.0"  # dmsGraphicBlockSize — bytes por bloque (ej: 1023 en Daktronics VFC)
+
+_GFX_TABLE = f"{_BASE}.10.6.1"
+_GFX_BLOCK = f"{_BASE}.10.7.1.3"
+
+
+def gfx_status(slot: int) -> str:
+    """OID de dmsGraphicStatus para el slot dado."""
+    return f"{_GFX_TABLE}.10.{slot}"
+
+def gfx_number(slot: int) -> str:
+    """OID de dmsGraphicNumber para el slot dado."""
+    return f"{_GFX_TABLE}.2.{slot}"
+
+def gfx_height(slot: int) -> str:
+    """OID de dmsGraphicHeight para el slot dado."""
+    return f"{_GFX_TABLE}.4.{slot}"
+
+def gfx_width(slot: int) -> str:
+    """OID de dmsGraphicWidth para el slot dado."""
+    return f"{_GFX_TABLE}.5.{slot}"
+
+def gfx_color_type(slot: int) -> str:
+    """OID de dmsGraphicType para el slot dado."""
+    return f"{_GFX_TABLE}.6.{slot}"
+
+def gfx_block_data(slot: int, i: int) -> str:
+    """OID de dmsGraphicBlockData para el slot y bloque i (1-based)."""
+    return f"{_GFX_BLOCK}.{slot}.{i}"

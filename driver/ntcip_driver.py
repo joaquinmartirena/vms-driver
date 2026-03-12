@@ -33,6 +33,8 @@ from snmp.ntcip1203 import (
     DMS_CONTROL_MODE,
     SHORT_ERROR_STATUS, DMS_STAT_DOOR_OPEN, WATCHDOG_FAILURE_COUNT,
     msg_multi_string, msg_crc, msg_status,
+    gfx_status, gfx_number, gfx_height, gfx_width, gfx_color_type, gfx_block_data,
+    DMS_GRAPHIC_BLOCK_SIZE, DMS_NUM_GRAPHICS,
 )
 
 logger = logging.getLogger(__name__)
@@ -47,6 +49,13 @@ _SNMP_RETRIES    = int(os.getenv("VMS_SNMP_RETRIES", "3"))
 # ─── Configuración de validación ───────────────────────────────────────────────
 _VALIDATE_TIMEOUT  = float(os.getenv("VMS_VALIDATE_TIMEOUT",  "10"))
 _VALIDATE_INTERVAL = float(os.getenv("VMS_VALIDATE_INTERVAL", "0.5"))
+
+# ─── Configuración de subida de gráficos ───────────────────────────────────────
+# El VFC reporta 64449 en dmsGraphicBlockSize pero ese es el max size total.
+# El block size real (confirmado empíricamente) es 1023 bytes.
+_GFX_BLOCK_SIZE  = int(os.getenv("VMS_GFX_BLOCK_SIZE",  "1023"))   # bytes por bloque SNMP
+_GFX_META_DELAY  = float(os.getenv("VMS_GFX_META_DELAY",  "0.0"))  # ya no necesario (hay poll)
+_GFX_BLOCK_DELAY = float(os.getenv("VMS_GFX_BLOCK_DELAY", "0.05")) # s entre bloques
 
 # ─── Otros parámetros configurables ───────────────────────────────────────────
 _SCAN_SLOTS             = int(os.getenv("VMS_SCAN_SLOTS",      "20"))
@@ -82,25 +91,195 @@ class NTCIPDriver(VMSDriver):
         self._init()
 
     def _init(self) -> None:
-        """Inicializa estado que requiere IO: IP origen, slots, validador."""
-        self._source_ip = self._source_ip_override or self._detect_source_ip()
-        self._slots     = SlotManager(total_slots=self._discover_slot_count())
-        self._validator = self._init_validator()
-        discovered = self._discover_supported_tags()
-        self._supported_tags = discovered if discovered is not None else self._get_supported_tags_fallback()
-        self._validator.set_supported_tags(self._supported_tags)
-        logger.debug("tags soportados", extra={"ip": self.ip, "tags": sorted(self._supported_tags)})
+        """Orquesta el auto-descubrimiento completo del panel."""
+        self._source_ip      = self._source_ip_override or self._detect_source_ip()
+        self._slots          = SlotManager(total_slots=self._discover_slot_count())
+        self._sign_width     = int(self._read.get(VMS_SIGN_WIDTH_PIXELS))
+        self._sign_height    = int(self._read.get(VMS_SIGN_HEIGHT_PIXELS))
+        self._fonts          = self._discover_fonts()
+        self._supported_tags = self._discover_supported_tags()
+        self._validator      = self._init_validator()
+        logger.info("panel inicializado", extra={
+            "ip": self.ip,
+            "slots": self._slots._total,
+            "fonts": len(self._fonts),
+            "supported_tags": sorted(self._supported_tags),
+        })
 
-    def _discover_supported_tags(self) -> set[str] | None:
+    def _discover_fonts(self) -> dict[int, dict]:
         """
-        Intenta leer dmsSupportedMultiTags del panel y decodifica el bitmask.
-        Devuelve None si el panel no implementa el OID (usa fallback).
+        Lee la tabla de fuentes del panel vía SNMP.
+        Devuelve dict: {font_number: {"name": str, "height": int, "width": int}}
+        Si el panel no soporta fonts, devuelve {}.
+        """
+        fonts = {}
+        try:
+            num_fonts = int(self._read.get("1.3.6.1.4.1.1206.4.2.3.3.1.0"))
+            for n in range(1, num_fonts + 1):
+                try:
+                    name = str(self._read.get(f"1.3.6.1.4.1.1206.4.2.3.3.2.1.3.{n}"))
+                    if not name:
+                        continue
+                    height = int(self._read.get(f"1.3.6.1.4.1.1206.4.2.3.3.2.1.5.{n}"))
+                    width  = int(self._read.get(f"1.3.6.1.4.1.1206.4.2.3.3.2.1.6.{n}"))
+                    fonts[n] = {"name": name, "height": height, "width": width}
+                except Exception:
+                    continue
+            logger.debug("fuentes descubiertas", extra={"ip": self.ip, "count": len(fonts)})
+        except Exception:
+            logger.debug("panel sin soporte de fuentes", extra={"ip": self.ip})
+        return fonts
+
+    def get_largest_font(self) -> int | None:
+        """Devuelve el número de la fuente con mayor altura. None si no hay fuentes."""
+        if not self._fonts:
+            return None
+        return max(self._fonts, key=lambda n: self._fonts[n]["height"])
+
+    def get_bold_largest_font(self) -> int | None:
+        """
+        Devuelve el número de la fuente bold más grande.
+        Detecta bold por nombre — fuentes que empiezan con 'fb'.
+        Fallback a get_largest_font() si no hay bold.
+        """
+        bold_fonts = {n: f for n, f in self._fonts.items() if f["name"].startswith("fb")}
+        if not bold_fonts:
+            return self.get_largest_font()
+        return max(bold_fonts, key=lambda n: bold_fonts[n]["height"])
+
+    @property
+    def panel_info(self) -> dict:
+        """Información descubierta del panel — útil para el playground."""
+        return {
+            "ip": self.ip,
+            "slots": self._slots._total,
+            "fonts": self._fonts,
+            "supported_tags": sorted(self._supported_tags),
+            "largest_font": self.get_largest_font(),
+            "bold_largest_font": self.get_bold_largest_font(),
+        }
+
+    def _discover_supported_tags(self) -> set[str]:
+        """
+        Descubre los tags MULTI soportados por el panel.
+
+        Estrategia:
+        1. Intentar leer dmsSupportedMultiTags (bitmask NTCIP 1203)
+        2. Si devuelve valor válido (>0) → decodificar bitmask
+        3. Si devuelve 0 o error → hacer probe empírico
         """
         try:
-            bitmask = int(self._read.get(MULTI_SUPPORTED_MULTI_TAGS))
-            return self._decode_supported_tags_bitmask(bitmask)
+            raw = self._read.get(MULTI_SUPPORTED_MULTI_TAGS)
+            # El VFC devuelve OctetString (bytes) en lugar de Integer.
+            # Convertir usando NTCIP bit-packing: byte i, bit 7-j → flag i*8+j
+            try:
+                bitmask = int(raw)
+            except (ValueError, TypeError):
+                data = bytes(raw)
+                bitmask = 0
+                for i, byte in enumerate(data):
+                    for j in range(8):
+                        if byte & (0x80 >> j):
+                            bitmask |= (1 << (i * 8 + j))
+            if bitmask > 0:
+                tags = self._decode_supported_tags_bitmask(bitmask)
+                logger.debug("tags desde bitmask", extra={"ip": self.ip, "bitmask": hex(bitmask), "tags": sorted(tags)})
+                tags |= self._probe_missing_tags(tags, {"tr", "g"})
+                return tags
         except Exception:
-            return None
+            pass
+
+        logger.debug("iniciando probe empírico de tags", extra={"ip": self.ip})
+        return self._probe_supported_tags()
+
+    def _probe_missing_tags(self, known: set[str], candidates: set[str]) -> set[str]:
+        """Prueba empíricamente solo los tags en `candidates` que no estén en `known`."""
+        PROBES = {
+            "tr": "[tr1,1,100,50]TEST",
+            "g":  None,  # no probeable sin gráfico — usar dmsNumGraphics
+        }
+        found: set[str] = set()
+        slot = 1
+        for tag in candidates - known:
+            if tag == "g":
+                try:
+                    if int(self._read.get(DMS_NUM_GRAPHICS)) > 0:
+                        found.add("g")
+                        logger.debug("tag [g] detectado vía dmsNumGraphics", extra={"ip": self.ip})
+                except Exception:
+                    pass
+                continue
+            multi = PROBES.get(tag)
+            if not multi:
+                continue
+            try:
+                self._write.set(msg_status(MEMORY_CHANGEABLE, slot), 6)
+                self._write.set(msg_multi_string(MEMORY_CHANGEABLE, slot), OctetString(multi))
+                self._write.set(msg_status(MEMORY_CHANGEABLE, slot), 7)
+                status = self._poll_until_valid(MEMORY_CHANGEABLE, slot)
+                if status == MessageStatus.VALID:
+                    found.add(tag)
+                    logger.debug(f"tag [{tag}] confirmado por probe", extra={"ip": self.ip})
+            except Exception:
+                pass
+            finally:
+                try:
+                    self._write.set(msg_status(MEMORY_CHANGEABLE, slot), 8)
+                except Exception:
+                    pass
+        return found
+
+    def _probe_supported_tags(self) -> set[str]:
+        """
+        Probe empírico: escribe mensajes de test en slot 1 y verifica validación.
+
+        Para cada tag, escribe un MULTI mínimo, solicita validación y verifica
+        si el panel devuelve status VALID. Tags core siempre incluidos sin probe.
+        Al terminar, limpia el slot 1 dejándolo en notUsed.
+        """
+        CORE_TAGS = {"jl", "jp", "nl", "np"}
+
+        TAG_PROBES = {
+            "pt":  "[pt10o0]TEST",
+            "cf":  "[cf255,255,255]TEST",
+            "cb":  "[cb0,0,0]TEST",
+            "pb":  "[pb0,0,0]TEST",
+            "sc":  "[sc2]TEST",
+            "fo":  "[fo1]TEST",
+            "fl":  "[fl5o0]TEST",
+            "hc":  "[hc41]",
+            "mv":  "[mv10o0,4,3,0]T",
+            "tr":  "[tr1,1,100,50]TEST",
+            "cr":  "[cr10,10]",
+            "sl":  "[sl5]TEST",
+            "f":   "[f1,0]",
+        }
+
+        supported = set(CORE_TAGS)
+        slot = 1
+
+        for tag, multi in TAG_PROBES.items():
+            try:
+                self._write.set(msg_status(MEMORY_CHANGEABLE, slot), 6)   # modifyReq
+                self._write.set(msg_multi_string(MEMORY_CHANGEABLE, slot), OctetString(multi))
+                self._write.set(msg_status(MEMORY_CHANGEABLE, slot), 7)   # validateReq
+                status = self._poll_until_valid(MEMORY_CHANGEABLE, slot)
+                if status == MessageStatus.VALID:
+                    supported.add(tag)
+                    logger.debug(f"tag soportado: [{tag}]", extra={"ip": self.ip})
+                else:
+                    logger.debug(f"tag NO soportado: [{tag}]", extra={"ip": self.ip})
+            except Exception as e:
+                logger.debug(f"tag probe error: [{tag}]", extra={"ip": self.ip, "error": str(e)})
+            finally:
+                try:
+                    self._write.set(msg_status(MEMORY_CHANGEABLE, slot), 8)  # notUsedReq
+                except Exception:
+                    pass
+
+        supported |= self._probe_missing_tags(supported, {"g"})
+        logger.debug("probe completado", extra={"ip": self.ip, "supported": sorted(supported)})
+        return supported
 
     def _decode_supported_tags_bitmask(self, bitmask: int) -> set[str]:
         """Decodifica el bitmask NTCIP 1203 v03 de dmsSupportedMultiTags."""
@@ -128,13 +307,6 @@ class NTCIPDriver(VMSDriver):
         }
         return {tag for bit, tag in BIT_TAG_MAP.items() if bitmask & (1 << bit)}
 
-    def _get_supported_tags_fallback(self) -> set[str]:
-        """
-        Tags safe por defecto cuando el panel no implementa dmsSupportedMultiTags.
-        Sobreescribir en subclases para ajustar al fabricante.
-        """
-        return {"jl", "jp", "nl", "np", "pt", "cf", "cb", "pb", "sc", "tr", "fo", "g", "fl", "hc", "f", "mv", "cr", "sl"}
-
     def _get_activate_priority(self) -> int:
         """Priority para dmsActivateMessage. Sobreescribir en subclases si es necesario."""
         return 3
@@ -157,21 +329,21 @@ class NTCIPDriver(VMSDriver):
             ) from e
 
     def _init_validator(self) -> MultiValidator:
-        """Consulta dimensiones y límites al panel vía SNMP. Sin fallback."""
-        width             = int(self._read.get(VMS_SIGN_WIDTH_PIXELS))
-        height            = int(self._read.get(VMS_SIGN_HEIGHT_PIXELS))
+        """Consulta límites al panel vía SNMP. Usa dimensiones ya cacheadas."""
         max_string_length = int(self._read.get(MULTI_MAX_MULTI_STRING_LENGTH))
         max_pages         = int(self._read.get(MULTI_MAX_NUMBER_PAGES))
         logger.debug("dimensiones del panel", extra={
-            "ip": self.ip, "width": width, "height": height,
+            "ip": self.ip, "width": self._sign_width, "height": self._sign_height,
             "max_string": max_string_length, "max_pages": max_pages,
         })
-        return MultiValidator(
-            width=width,
-            height=height,
+        validator = MultiValidator(
+            width=self._sign_width,
+            height=self._sign_height,
             max_string_length=max_string_length,
             max_pages=max_pages,
         )
+        validator.set_supported_tags(self._supported_tags)
+        return validator
 
     # ─── Interfaz pública ─────────────────────────────────────────────────────
 
@@ -400,6 +572,89 @@ class NTCIPDriver(VMSDriver):
             logger.error("error blankeando panel",
                          extra={"ip": self.ip, "error": str(e)})
             return False
+
+    def send_graphic(
+        self,
+        path: str,
+        slot: int,
+        color_type: int = 4,
+        crop: str = "left",
+    ) -> "GraphicPayload":
+        """
+        Sube una imagen al panel como gráfico NTCIP 1203.
+
+        Secuencia:
+            1. convert_image() → bitmap dividido en bloques
+            2. SET dmsGraphicStatus = modifyReq (7)
+            3. SET dmsGraphicNumber, Height, Width, Type
+            4. SET dmsGraphicBlockData para cada bloque (1-based)
+            5. SET dmsGraphicStatus = readyForUseReq (8)
+
+        El gráfico queda disponible para usarlo con [g{slot}] en MULTI.
+        """
+        from driver.graphics.payload import GraphicPayload, convert_image
+
+        # El VFC reporta 64449 en dmsGraphicBlockSize (.10.3.0), que en realidad
+        # es el max size del gráfico, no el tamaño por bloque. El block size real
+        # confirmado es 1023 — usar ese valor fijo para fragmentar el bitmap.
+        block_size = _GFX_BLOCK_SIZE
+        logger.debug("block size fijo", extra={"ip": self.ip, "block_size": block_size})
+
+        payload = convert_image(
+            path, self._sign_width, self._sign_height,
+            slot, block_size=block_size, color_type=color_type, crop=crop,
+        )
+
+        # El VFC no soporta notUsedReq(6). Ir directo a modifyReq(7) desde
+        # cualquier estado — el dispositivo acepta la transición.
+        current = None
+        try:
+            current = int(self._read.get(gfx_status(slot)))
+            logger.debug("estado actual del gráfico", extra={"ip": self.ip, "slot": slot, "status": current})
+        except Exception:
+            pass
+
+        self._write.set(gfx_status(slot),     7)               # modifyReq
+        self._write.set(gfx_number(slot),     slot)
+        self._write.set(gfx_height(slot),     payload.height)
+        self._write.set(gfx_width(slot),      payload.width)
+        self._write.set(gfx_color_type(slot), payload.color_type)
+
+        # Esperar a que el dispositivo entre en modifying(2) antes de enviar bloques
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            try:
+                s = int(self._read.get(gfx_status(slot)))
+                if s == 2:  # modifying
+                    break
+            except Exception:
+                pass
+            time.sleep(0.3)
+
+        for i, block in enumerate(payload.blocks, start=1):
+            self._write.set(gfx_block_data(slot, i), OctetString(block))
+            logger.debug("bloque gráfico enviado",
+                         extra={"ip": self.ip, "slot": slot, "block": i})
+            if _GFX_BLOCK_DELAY > 0:
+                time.sleep(_GFX_BLOCK_DELAY)
+
+        self._write.set(gfx_status(slot), 8)                   # readyForUseReq
+
+        # Esperar a readyForUse(4)
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            try:
+                s = int(self._read.get(gfx_status(slot)))
+                if s in (4, 5):  # readyForUse o error
+                    break
+            except Exception:
+                pass
+            time.sleep(0.5)
+
+        logger.info("gráfico subido",
+                    extra={"ip": self.ip, "slot": slot,
+                           "blocks": len(payload.blocks), "bytes": payload.total_bytes})
+        return payload
 
     # ─── Métodos internos ─────────────────────────────────────────────────────
 

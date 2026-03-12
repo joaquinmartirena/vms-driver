@@ -491,6 +491,71 @@ def delete_message_menu(driver: VMSDriver):
     input("  [Enter para continuar]")
 
 
+def send_graphic_menu(driver: VMSDriver):
+    """Sube una imagen al panel como gráfico NTCIP y opcionalmente la activa."""
+    print()
+    print("─── Subir gráfico ──────────────────────────────────────")
+
+    # Path a la imagen
+    path = input("  Path de la imagen (PNG/JPG/...): ").strip()
+    if not path or not os.path.isfile(path):
+        print("  * Archivo no encontrado.")
+        input("  [Enter para volver]")
+        return
+
+    # Slot
+    while True:
+        raw = input("  Slot del gráfico [Enter=1]: ").strip()
+        if raw == "":
+            slot = 1
+            break
+        try:
+            slot = int(raw)
+            if slot >= 1:
+                break
+            print("  * El slot debe ser >= 1.")
+        except ValueError:
+            print("  * Ingresa un número.")
+
+    # Tipo de color
+    print("  Tipo de color:")
+    print("    4) color24bit — 3 bytes/pixel BGR  * default")
+    print("    1) mono1bit   — 1 bit/pixel")
+    raw = input("  [Enter=4]: ").strip()
+    color_type = 1 if raw == "1" else 4
+
+    # Crop
+    print("  Recorte horizontal (si la imagen es más ancha que el panel):")
+    print("    1) left   * default")
+    print("    2) center")
+    print("    3) right")
+    raw = input("  [Enter=left]: ").strip()
+    crop = {"2": "center", "3": "right"}.get(raw, "left")
+
+    # Subir
+    print()
+    print(f"  Subiendo imagen '{os.path.basename(path)}' → slot {slot} ({color_type=}, {crop=})...")
+    try:
+        payload = driver.send_graphic(path, slot=slot, color_type=color_type, crop=crop)
+        print(f"  OK — {payload.width}x{payload.height}px | {payload.total_bytes} bytes | {len(payload.blocks)} bloques")
+    except Exception as e:
+        print(f"  * Error: {e}")
+        input("  [Enter para volver]")
+        return
+
+    # Activar en pantalla
+    print()
+    activar = input(f"  Activar ahora con [g{slot}]? [S/n]: ").strip().lower()
+    if activar != "n":
+        try:
+            result = driver.send_message(f"[g{slot}]")
+            print(f"  Activado — Slot mensaje: {result.slot}")
+        except Exception as e:
+            print(f"  * Error activando: {e}")
+
+    input("  [Enter para continuar]")
+
+
 def main_menu(driver: VMSDriver, device_info: DeviceInfo):
     while True:
         clear_screen()
@@ -503,10 +568,14 @@ def main_menu(driver: VMSDriver, device_info: DeviceInfo):
             online_str = "Online" if status.online else "Offline"
             errors_str = f"Errores: {status.active_errors()}" if status.has_errors else "Sin errores"
             msg_str = current if current else "(vacio)"
-            tags_str = " ".join(f"[{t}]" for t in sorted(driver._supported_tags))
+            info = driver.panel_info
             print(f"  Estado:  {online_str} | {errors_str}")
             print(f"  Mensaje: {msg_str}")
-            print(f"  Tags:    {tags_str}")
+            if info["fonts"]:
+                largest = info["bold_largest_font"]
+                font_name = info["fonts"][largest]["name"] if largest else "N/A"
+                print(f"  Fuente max: [{largest}] {font_name}")
+            print(f"  Tags:    {' '.join(f'[{t}]' for t in info['supported_tags'])}")
         except Exception as e:
             print(f"  * Error leyendo estado: {e}")
 
@@ -518,6 +587,7 @@ def main_menu(driver: VMSDriver, device_info: DeviceInfo):
         print("  4) Ver estado completo")
         print("  5) Ver mensajes en tabla")
         print("  6) Borrar mensaje de tabla")
+        print("  7) Subir grafico (imagen → panel)")
         print("  0) Salir")
         print()
 
@@ -574,6 +644,9 @@ def main_menu(driver: VMSDriver, device_info: DeviceInfo):
 
         elif opcion == "6":
             delete_message_menu(driver)
+
+        elif opcion == "7":
+            send_graphic_menu(driver)
 
         elif opcion == "0":
             print("\n  Hasta luego.\n")

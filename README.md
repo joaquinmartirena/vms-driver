@@ -1,7 +1,7 @@
 # vms-driver
 
 Driver NTCIP 1203 sobre SNMP v2c para paneles VMS/DMS de señalización variable.
-Implementaciones disponibles: **Daktronics VFC** (144×96 px, ámbar) y **Fixalia** (320×64 px).
+Implementaciones disponibles: **Daktronics VFC** (144×96 px, ámbar), **Fixalia** (320×64 px) y **ChainZone** (48×96 px).
 
 ---
 
@@ -19,9 +19,12 @@ Implementaciones disponibles: **Daktronics VFC** (144×96 px, ámbar) y **Fixali
 - [MULTI — `driver/multi.py`](#multi---drivermultipy)
 - [SlotManager — `driver/slots.py`](#slotmanager---driversslotspy)
 - [Interfaz de driver — `driver/base.py`](#interfaz-de-driver)
+- [NTCIPDriver — `driver/ntcip_driver.py`](#ntcipdriver---driverntcip_driverpy)
+- [Módulo de gráficos — `driver/graphics/`](#módulo-de-gráficos)
 - [Factory — `driver/factory.py`](#factory)
 - [Driver Daktronics VFC](#driver-daktronics-vfc)
 - [Driver Fixalia](#driver-fixalia)
+- [Driver ChainZone](#driver-chainzone)
 - [Dispositivos de referencia](#dispositivos-de-referencia)
 - [Uso rápido](#uso-rápido)
 - [Playground interactivo](#playground-interactivo)
@@ -36,30 +39,34 @@ Implementaciones disponibles: **Daktronics VFC** (144×96 px, ámbar) y **Fixali
 │                   Aplicación / API                       │
 └─────────────────────────┬────────────────────────────────┘
                           │  VMSDriver (interfaz abstracta)
-          ┌───────────────┴───────────────┐
-          │                               │
-┌─────────▼────────────────┐   ┌──────────▼──────────────┐
-│  DaktronicsVFCDriver     │   │   FixaliaDriver          │
-│  daktronics/driver.py    │   │   fixalia/driver.py      │
-│  ping · get_status       │   │   ping · get_status      │
-│  send_message · ...      │   │   send_message · ...     │
-└──────┬───────────────────┘   └──────┬───────────────────┘
-       │                              │
-       └──────────────┬───────────────┘
-                      │  driver/slots.py (compartido)
-             ┌────────▼───────────────────┐
-             │      SlotManager           │
-             └────────────────────────────┘
-       │                              │
-       │ OIDs + constantes            │ OIDs + constantes
-┌──────▼──────────────────┐  ┌────────▼────────────────────┐
-│ daktronics/oids.py      │  │  fixalia/oids.py             │
-│ (re-exporta ntcip1203)  │  │  (re-exporta ntcip1203)      │
-└──────────┬──────────────┘  └────────┬────────────────────┘
-           └──────────────┬───────────┘
-                          │ OIDs estándar
-             ┌────────────▼────────────────┐
-             │    snmp/ntcip1203.py         │
+          ┌───────────────┼───────────────────┐
+          │               │                   │
+┌─────────▼──────────┐  ┌─▼──────────────┐  ┌▼─────────────────┐
+│ DaktronicsVFCDriver│  │  FixaliaDriver  │  │  ChainZoneDriver  │
+│ daktronics/driver  │  │ fixalia/driver  │  │ chainzone/driver  │
+└─────────┬──────────┘  └────┬────────────┘  └──────┬───────────┘
+          │                  │                       │
+          └──────────────────┼───────────────────────┘
+                             │  NTCIPDriver (implementación base NTCIP 1203)
+                    ┌────────▼──────────────────────────────┐
+                    │         driver/ntcip_driver.py         │
+                    │  8 métodos · auto-descubrimiento       │
+                    │  fonts · tags · slots · validación     │
+                    └────────┬──────────────────────────────┘
+                             │  driver/slots.py (compartido)
+                    ┌────────▼───────────────────┐
+                    │      SlotManager           │
+                    └────────────────────────────┘
+          │                  │                       │
+    OIDs  │            OIDs  │               OIDs    │
+┌─────────▼───────────┐  ┌───▼──────────────────┐  ┌▼──────────────────────┐
+│ daktronics/oids.py  │  │  fixalia/oids.py      │  │  chainzone/oids.py    │
+│ (re-exporta ntcip)  │  │  (re-exporta ntcip)   │  │  (prioridad override) │
+└──────────┬──────────┘  └────────┬──────────────┘  └──────────┬────────────┘
+           └────────────┬─────────┘───────────────────────────┘
+                        │ OIDs estándar
+             ┌──────────▼───────────────────┐
+             │    snmp/ntcip1203.py          │
              │  7 grupos NTCIP 1203 v03     │
              └─────────────────────────────┘
                           │ transporte
@@ -70,8 +77,8 @@ Implementaciones disponibles: **Daktronics VFC** (144×96 px, ámbar) y **Fixali
              └─────────────────────────────┘
 ```
 
-El sistema está diseñado para múltiples fabricantes: cada uno implementa `VMSDriver`
-sin que el resto del sistema sepa qué hardware hay debajo.
+El sistema está diseñado para múltiples fabricantes: cada fabricante extiende
+`NTCIPDriver` (~3 líneas de código) sin reimplementar el protocolo.
 `driver/factory.py` instancia el driver correcto a partir de un `DeviceInfo`.
 
 ---
@@ -89,18 +96,29 @@ vms-driver/
 │   ├── __init__.py
 │   ├── base.py            # VMSDriver — interfaz abstracta (8 métodos)
 │   ├── factory.py         # create_driver(DeviceInfo) — instanciación por fabricante
+│   ├── ntcip_driver.py    # NTCIPDriver — implementación base NTCIP 1203 completa
 │   ├── multi.py           # MultiBuilder + MultiValidator — lenguaje MULTI (NTCIP 1203)
 │   ├── slots.py           # SlotManager — gestión thread-safe de slots (compartido)
 │   ├── daktronics/
 │   │   ├── __init__.py
-│   │   ├── driver.py      # DaktronicsVFCDriver — implementación completa
+│   │   ├── driver.py      # DaktronicsVFCDriver — subclase de NTCIPDriver (~3 líneas)
 │   │   ├── oids.py        # Constantes del dispositivo + re-export ntcip1203
 │   │   ├── slots.py       # Shim de compatibilidad → re-exporta driver.slots
 │   │   └── multi.py       # Shim de compatibilidad → re-exporta driver.multi
-│   └── fixalia/
+│   ├── fixalia/
+│   │   ├── __init__.py
+│   │   ├── driver.py      # FixaliaDriver — subclase de NTCIPDriver (~3 líneas)
+│   │   └── oids.py        # Constantes del dispositivo + re-export ntcip1203
+│   └── chainzone/
 │       ├── __init__.py
-│       ├── driver.py      # FixaliaDriver — implementación completa
-│       └── oids.py        # Constantes del dispositivo + re-export ntcip1203
+│       ├── driver.py      # ChainZoneDriver — subclase de NTCIPDriver (~3 líneas)
+│       └── oids.py        # Prioridad de activación confirmada en panel real
+│   ├── graphics/
+│   │   ├── __init__.py
+│   │   ├── image.py       # load_image, resize_to_sign, to_ntcip_bitmap
+│   │   ├── bitmap.py      # split_into_blocks — fragmentación en bloques SNMP
+│   │   └── payload.py     # convert_image → GraphicPayload
+│   └── chainzone/
 │
 ├── models/
 │   └── device.py          # DeviceInfo, DeviceStatus, Message, enums
@@ -108,13 +126,16 @@ vms-driver/
 ├── tests/
 │   ├── test_daktronics_driver.py  # tests de integración — panel real
 │   ├── test_fixalia_driver.py     # tests de integración — simulador
+│   ├── test_chainzone_driver.py   # tests de integración — panel real
 │   └── test_snmp_client.py        # tests de integración — panel real
 │
 └── tools/
-    └── message_playground.py  # CLI interactivo para pruebas en dispositivo real
+    ├── message_playground.py  # CLI interactivo para pruebas en dispositivo real
+    └── diag_graphic.py        # Diagnóstico paso a paso de subida de gráficos NTCIP
 ```
 
 > **Módulos canónicos compartidos:**
+> - `driver/ntcip_driver.py` — `NTCIPDriver` (implementación base; todos los drivers heredan de aquí)
 > - `driver/slots.py` — `SlotManager` (todos los drivers importan desde aquí)
 > - `driver/multi.py` — `MultiBuilder` / `MultiValidator` (independiente del fabricante)
 >
@@ -137,6 +158,8 @@ Ningún valor está hardcodeado en los módulos del driver.
 | `VMS_SNMP_RETRIES` | `3` | Reintentos ante timeout |
 | `VMS_VALIDATE_TIMEOUT` | `10` | Timeout esperando validación de mensaje (segundos) |
 | `VMS_VALIDATE_INTERVAL` | `0.5` | Intervalo entre polls de validación (segundos) |
+| `VMS_GFX_BLOCK_SIZE` | `1023` | Bytes por bloque SNMP para gráficos (ver nota Daktronics VFC) |
+| `VMS_GFX_BLOCK_DELAY` | `0.05` | Pausa entre bloques de gráfico (segundos) |
 | `VMS_PANEL_IP` | — | IP del panel (usada en tests y playground) |
 | `VMS_PANEL_PORT` | `161` | Puerto del panel (usado en playground) |
 
@@ -462,9 +485,150 @@ class VMSDriver(ABC):
 
 Para agregar un nuevo fabricante:
 1. Crear `driver/fabricante/__init__.py`
-2. Crear `driver/fabricante/oids.py` (patrón de `daktronics/oids.py`)
-3. Crear `driver/fabricante/driver.py` (subclase de `VMSDriver`)
-4. Registrar en `driver/factory.py` → `_REGISTRY`
+2. Crear `driver/fabricante/driver.py` (subclase de `NTCIPDriver`, ~3 líneas)
+3. Registrar en `driver/factory.py` → `_REGISTRY`
+
+---
+
+## NTCIPDriver — `driver/ntcip_driver.py`
+
+**`NTCIPDriver`** es la implementación base completa de NTCIP 1203 v03.
+Todos los drivers de fabricante heredan de esta clase y normalmente solo
+sobreescriben `_get_activate_priority()`.
+
+### Auto-descubrimiento en `_init()`
+
+Al instanciar, el driver hace las siguientes lecturas SNMP automáticamente:
+
+| Paso | Método | Descripción |
+|---|---|---|
+| 1 | `_detect_source_ip()` | Detecta la IP local con ruta al panel (sin tráfico extra) |
+| 2 | `_discover_slot_count()` | Lee `DMS_MAX_CHANGEABLE_MSG` → inicializa `SlotManager` |
+| 3 | `_discover_fonts()` | Lee la tabla de fuentes (número, nombre, altura, ancho) |
+| 4 | `_discover_supported_tags()` | Bitmask NTCIP o probe empírico en slot 1 |
+| 5 | `_init_validator()` | Lee resolución + límites → construye `MultiValidator` |
+
+Si el panel no responde en el paso 2, lanza `ConnectionError` (fail fast).
+
+### Descubrimiento de fuentes
+
+```python
+driver = ChainZoneDriver(ip="192.168.8.49")
+
+driver.panel_info
+# {
+#   "ip": "192.168.8.49",
+#   "slots": 9,
+#   "fonts": {1: {"name": "fb12", "height": 12, "width": 0}, ...},
+#   "supported_tags": ["cf", "fo", "jl", "jp", "nl", "np", "pt", ...],
+#   "largest_font": 7,
+#   "bold_largest_font": 7
+# }
+
+driver.get_largest_font()       # → int | None — fuente con mayor altura
+driver.get_bold_largest_font()  # → int | None — fuente bold (nombre "fb…") más grande
+```
+
+### Descubrimiento de tags MULTI soportados
+
+1. Intenta leer `dmsSupportedMultiTags` (bitmask NTCIP 1203 v03)
+   - Algunos firmwares (ej. Daktronics VFC) devuelven el valor como `OctetString`
+     en lugar de `Integer`; el driver lo decodifica usando NTCIP bit-packing
+     (byte i, bit 7−j → flag i×8+j)
+2. Si el panel devuelve `0` o falla → hace probe empírico: escribe un MULTI mínimo
+   por cada tag en slot 1, solicita validación y verifica si el panel devuelve `VALID`
+3. Los tags core (`jl`, `jp`, `nl`, `np`) siempre se incluyen sin probe
+
+### `send_graphic(path, slot, color_type?, crop?) → GraphicPayload`
+
+Sube una imagen al panel como gráfico NTCIP 1203, referenciable con `[gN]` en MULTI.
+
+```
+1. Convertir imagen → bitmap BGR / mono1bit, dividir en bloques de VMS_GFX_BLOCK_SIZE bytes
+2. SET dmsGraphicStatus = modifyReq (7)
+3. SET dmsGraphicNumber, Height, Width, Type
+4. POLL dmsGraphicStatus hasta modifying (2)  ← garantiza que el dispositivo está listo
+5. SET dmsGraphicBlockData para cada bloque (1-based, OctetString)
+6. SET dmsGraphicStatus = readyForUseReq (8)
+7. POLL dmsGraphicStatus hasta readyForUse (4)
+```
+
+```python
+payload = driver.send_graphic(
+    path="foto.jpg",
+    slot=4,
+    color_type=4,   # 4=color24bit (default), 1=mono1bit
+    crop="center",  # "left" (default) | "center" | "right"
+)
+# payload.width, payload.height, payload.total_bytes, payload.blocks
+driver.send_message(f"[g{payload.slot}]")
+```
+
+### `send_message(multi_string, priority?) → Message`
+
+```
+1. Validar MULTI string (MultiValidator — tags, dimensiones, longitud)
+2. acquire() → slot libre del SlotManager
+3. SET messageStatus  = modifyReq (6)
+4. SET messageMultiString = <MULTI string>
+5. SET messageStatus  = validateReq (7)
+6. POLL messageStatus hasta valid(4) — timeout VMS_VALIDATE_TIMEOUT
+   ├─ valid  → continuar
+   └─ error  → mark_corrupted(slot) + raise ValueError
+7. GET messageCRC
+8. SET activateMessage = <payload 12 bytes big-endian>
+   └─ excepción → release(slot) + raise
+```
+
+**Payload `dmsActivateMessage` (12 bytes big-endian):**
+
+```
+2 B — duration     (0xFFFF = infinito)
+1 B — priority     (sobreescribible por subclase)
+1 B — memory_type  (3 = changeable)
+2 B — slot
+2 B — CRC
+4 B — IP origen    (detectada automáticamente)
+```
+
+---
+
+## Módulo de gráficos
+
+**`driver/graphics/`** — conversión de imagen a bitmap NTCIP 1203 y fragmentación en bloques SNMP.
+
+### `image.py`
+
+```python
+from driver.graphics.image import load_image, resize_to_sign, to_ntcip_bitmap
+
+img    = load_image("foto.jpg")                 # abre y convierte a RGB
+img    = resize_to_sign(img, 144, 96, "center") # fill + recorte al tamaño del panel
+bitmap = to_ntcip_bitmap(img, color_type=4)     # BGR (color24bit) o mono1bit
+```
+
+| `color_type` | Formato | Bytes/píxel |
+|---|---|---|
+| `4` | color24bit — 3 bytes BGR por píxel | 3 |
+| `1` | mono1bit — 1 bit/píxel, MSB-first, filas padded a byte boundary | ~1/8 |
+
+### `bitmap.py`
+
+```python
+from driver.graphics.bitmap import split_into_blocks
+
+blocks = split_into_blocks(bitmap, block_size=1023)
+# El último bloque se zero-padea a block_size bytes
+```
+
+### `payload.py`
+
+```python
+from driver.graphics.payload import convert_image, GraphicPayload
+
+payload = convert_image("foto.jpg", width=144, height=96, slot=4, block_size=1023)
+# payload.width, payload.height, payload.color_type, payload.blocks, payload.total_bytes
+```
 
 ---
 
@@ -476,10 +640,11 @@ Para agregar un nuevo fabricante:
 from driver.factory import create_driver, available_drivers
 from models.device import DeviceInfo
 
-driver = create_driver(DeviceInfo(ip="66.17.99.157", device_type="daktronics_vfc"))
-driver = create_driver(DeviceInfo(ip="127.0.0.1",   device_type="fixalia"))
+driver = create_driver(DeviceInfo(ip="66.17.99.157",   device_type="daktronics_vfc"))
+driver = create_driver(DeviceInfo(ip="127.0.0.1",      device_type="fixalia"))
+driver = create_driver(DeviceInfo(ip="192.168.8.49",   device_type="chainzone"))
 
-available_drivers()  # → ["daktronics_vfc", "fixalia"]
+available_drivers()  # → ["daktronics_vfc", "fixalia", "chainzone"]
 ```
 
 **Registro actual:**
@@ -488,12 +653,13 @@ available_drivers()  # → ["daktronics_vfc", "fixalia"]
 |---|---|
 | `daktronics_vfc` | `driver.daktronics.driver.DaktronicsVFCDriver` |
 | `fixalia` | `driver.fixalia.driver.FixaliaDriver` |
+| `chainzone` | `driver.chainzone.driver.ChainZoneDriver` |
 
 ---
 
 ## Driver Daktronics VFC
 
-**`driver/daktronics/driver.py`** — `DaktronicsVFCDriver`
+**`driver/daktronics/driver.py`** — `DaktronicsVFCDriver(NTCIPDriver)`
 
 ```python
 from driver.daktronics.driver import DaktronicsVFCDriver
@@ -501,61 +667,24 @@ from driver.daktronics.driver import DaktronicsVFCDriver
 driver = DaktronicsVFCDriver(ip="66.17.99.157")
 ```
 
-#### Inicialización (`_init()`)
+Hereda toda la lógica de `NTCIPDriver`. La clase tiene ~3 líneas de código
+propio: usa la prioridad de activación estándar (`3`) y no sobreescribe ningún
+otro comportamiento.
 
-Al instanciar, el driver hace tres llamadas SNMP:
+Todo el auto-descubrimiento (fuentes, tags, slots, dimensiones) lo realiza
+`NTCIPDriver._init()` al instanciar. Si el panel no responde, lanza
+`ConnectionError` (fail fast).
 
-1. `_discover_slot_count()` — lee `DMS_MAX_CHANGEABLE_MSG` para inicializar el `SlotManager`
-2. `_init_validator()` — lee resolución y límites para construir el `MultiValidator`
-3. `_detect_source_ip()` — detecta la IP local con ruta al panel (sin tráfico extra)
-
-Si el panel no responde, lanza `ConnectionError` con mensaje claro (fail fast).
-
-#### `send_message(multi_string, priority=3) → Message`
-
+**Tests:**
+```bash
+VMS_PANEL_IP=66.17.99.157 python tests/test_daktronics_driver.py
 ```
-1. Validar MULTI string (MultiValidator)
-2. SET messageStatus  = modifyReq (6)
-3. SET messageMultiString = <MULTI string>
-4. SET messageStatus  = validateReq (7)
-5. POLL messageStatus hasta valid(4) — timeout VMS_VALIDATE_TIMEOUT
-   ├─ valid  → continuar
-   └─ error  → mark_corrupted(slot) + rollback + raise ValueError
-6. GET messageCRC
-7. SET activateMessage = <payload 12 bytes big-endian>
-   └─ excepción → release(slot) + raise
-```
-
-**Payload `dmsActivateMessage` (12 bytes):**
-
-```
-2 B — duration     (0xFFFF = infinito)
-1 B — priority
-1 B — memory_type  (3 = changeable)
-2 B — slot
-2 B — CRC
-4 B — IP origen    (detectada automáticamente)
-```
-
-#### `ping() → bool`
-
-Lee `sysDescr` (OID mínimo garantizado). No lanza excepción.
-
-#### `get_status() → DeviceStatus`
-
-Lee `SHORT_ERROR_STATUS`, `DMS_STAT_DOOR_OPEN`, `WATCHDOG_FAILURE_COUNT`,
-`DMS_CONTROL_MODE`. Devuelve `online=False` si el panel no responde.
-
-#### `get_messages() → list[Message]`
-
-Combina slots `IN_USE` del `SlotManager` + scan de los primeros 20 slots
-(para detectar mensajes preexistentes al arranque).
 
 ---
 
 ## Driver Fixalia
 
-**`driver/fixalia/driver.py`** — `FixaliaDriver`
+**`driver/fixalia/driver.py`** — `FixaliaDriver(NTCIPDriver)`
 
 ```python
 from driver.fixalia.driver import FixaliaDriver
@@ -563,16 +692,47 @@ from driver.fixalia.driver import FixaliaDriver
 driver = FixaliaDriver(ip="127.0.0.1")
 ```
 
-Implementa exactamente los mismos 8 métodos que `DaktronicsVFCDriver`,
-con la misma secuencia NTCIP 1203, el mismo `SlotManager` compartido
-y el mismo patrón de logging estructurado.
-
-Auto-descubre en `_init()` la resolución del panel, límites MULTI y
-número de slots leyendo el dispositivo vía SNMP. Sin fallbacks silenciosos.
+Hereda toda la lógica de `NTCIPDriver`. Auto-descubre resolución, fuentes,
+tags y slots al inicializar leyendo el simulador vía SNMP. Sin fallbacks
+silenciosos.
 
 **Tests:**
 ```bash
 VMS_PANEL_IP=127.0.0.1 python tests/test_fixalia_driver.py
+```
+
+---
+
+## Driver ChainZone
+
+**`driver/chainzone/driver.py`** — `ChainZoneDriver(NTCIPDriver)`
+
+```python
+from driver.chainzone.driver import ChainZoneDriver
+
+driver = ChainZoneDriver(ip="192.168.8.49")
+```
+
+Panel confirmado: 48×96 px, 9 slots, 19 fuentes. Hereda toda la lógica de
+`NTCIPDriver` y sobreescribe únicamente la prioridad de activación
+(`0xFF` — confirmado contra panel real).
+
+```python
+# Uso recomendado: fuente dinámica descubierta en init
+largest = driver.get_bold_largest_font()
+multi = f"[fo{largest}][jl3]CHAIN[np][fo{largest}][jl3]ZONE"
+msg = driver.send_message(multi)
+```
+
+**Constante específica del fabricante (`driver/chainzone/oids.py`):**
+
+| Constante | Valor | Notas |
+|---|---|---|
+| `ACTIVATE_MESSAGE_PRIORITY` | `0xFF` | Confirmado contra panel real ChainZone |
+
+**Tests:**
+```bash
+VMS_PANEL_IP=192.168.8.49 python tests/test_chainzone_driver.py
 ```
 
 ---
@@ -598,6 +758,15 @@ VMS_PANEL_IP=127.0.0.1 python tests/test_fixalia_driver.py
 | Páginas máx. | 6 |
 | Esquema de color | 4 = colorClassic |
 | Slots por tipo de memoria | 500 |
+| Slots de gráficos | 255 |
+| Graphic max size | 64 449 bytes |
+| Graphic block size real | **1 023 bytes** (ver nota) |
+
+> **Quirks del firmware Daktronics VFC:**
+> - `dmsSupportedMultiTags` se devuelve como `OctetString` (no `Integer`) — el driver lo decodifica con NTCIP bit-packing
+> - `dmsGraphicBlockSize` (OID `.10.3.0`) devuelve `64449`, que es el *max size* total, no el block size de transferencia; el block size real confirmado es **1023 bytes** (hardcodeado como `VMS_GFX_BLOCK_SIZE`)
+> - `dmsGraphicStatus = notUsedReq (6)` devuelve `wrongValue` — el driver va directo a `modifyReq (7)` desde cualquier estado
+> - Enviar un bloque de 64449 bytes por UDP causa fragmentación IP que el VFC descarta silenciosamente → timeout
 
 ### Fixalia (simulador)
 
@@ -611,6 +780,19 @@ VMS_PANEL_IP=127.0.0.1 python tests/test_fixalia_driver.py
 | Dimensiones | 320 × 64 píxeles |
 | Dimensiones físicas | 2 900 × 2 900 mm |
 | Mensajes permanentes | 2 |
+
+### ChainZone
+
+| Parámetro | Valor |
+|---|---|
+| IP | `192.168.8.49` |
+| Puerto SNMP | `161` UDP / SNMP v2c |
+| Community lectura | `public` |
+| Community escritura | `public` |
+| Dimensiones | 48 × 96 píxeles |
+| Slots | 9 |
+| Fuentes | 19 (auto-descubiertas) |
+| Prioridad de activación | `0xFF` |
 
 ---
 
@@ -627,17 +809,22 @@ driver = create_driver(DeviceInfo(ip="66.17.99.157", device_type="daktronics_vfc
 # Fixalia
 driver = create_driver(DeviceInfo(ip="127.0.0.1", device_type="fixalia"))
 
+# ChainZone
+driver = create_driver(DeviceInfo(ip="192.168.8.49", device_type="chainzone"))
+
 # Verificar conectividad
 if not driver.ping():
     raise RuntimeError("Panel no responde")
+
+# Fuente detectada automáticamente (recomendado para ChainZone y otros)
+font = driver.get_bold_largest_font() or 1
 
 # Enviar un mensaje con el builder
 multi = (
     MultiBuilder()
     .page_time(30, 0)
     .page_middle()
-    .font(24)
-    .color_foreground(255, 180, 0)
+    .font(font)
     .center()
     .text("PRECAUCIÓN")
     .new_line()
@@ -651,6 +838,9 @@ print(f"slot={msg.slot}  CRC={msg.crc}  status={msg.status}")
 status = driver.get_status()
 print(f"online={status.online}  errores={status.active_errors()}")
 
+# Info del panel (fuentes, tags, slots)
+print(driver.panel_info)
+
 # Listar mensajes en tabla
 for m in driver.get_messages():
     print(f"slot={m.slot}  {m.multi_string}")
@@ -660,6 +850,10 @@ driver.delete_message(slot=2)
 
 # Limpiar pantalla
 driver.clear_message()
+
+# Subir una imagen como gráfico NTCIP y activarla
+payload = driver.send_graphic("foto.jpg", slot=4, color_type=4, crop="center")
+driver.send_message(f"[g{payload.slot}]")
 
 # Estado interno de slots
 print(driver._slots.status())
@@ -698,6 +892,17 @@ VMS_PANEL_IP=10.0.0.5 VMS_DEVICE_TYPE=fixalia python tools/message_playground.py
 | `4` | Ver estado completo |
 | `5` | Ver mensajes en tabla |
 | `6` | Borrar mensaje por slot |
+| `7` | Subir gráfico (imagen → panel) — color24bit o mono1bit |
+
+### Diagnóstico de gráficos
+
+Para depurar problemas de subida de imágenes, usar el script de diagnóstico:
+
+```bash
+python tools/diag_graphic.py "/ruta/imagen.jpg" 4
+```
+
+Ejecuta cada SET SNMP por separado con logging explícito e indica el paso exacto donde falla.
 
 ---
 
@@ -709,6 +914,9 @@ VMS_PANEL_IP=66.17.99.157 python tests/test_daktronics_driver.py
 
 # Fixalia (simulador)
 VMS_PANEL_IP=127.0.0.1 python tests/test_fixalia_driver.py
+
+# ChainZone (panel real)
+VMS_PANEL_IP=192.168.8.49 python tests/test_chainzone_driver.py
 ```
 
 Los tests conectan directamente al panel/simulador — no usan mocks.
@@ -717,13 +925,24 @@ Los tests conectan directamente al panel/simulador — no usan mocks.
 
 ## Dependencias
 
+Principales:
+
 ```
-pysnmp-lextudio >= 6.0   # fork mantenido; expone pysnmp.hlapi.v3arch.asyncio
+pysnmp==7.1.22     # fork lextudio; expone pysnmp.hlapi.v3arch.asyncio
+pysmi==1.6.3
+cryptography==46.x
+```
+
+Desarrollo / tests:
+
+```
+pytest==9.x
+pytest-cov==4.x
 ```
 
 ```bash
-pip install pysnmp-lextudio
+pip install -r requirements.txt
 ```
 
-> **Nota:** usar `pysnmp-lextudio` (no `pysnmp`). El paquete original dejó de
+> **Nota:** usar `pysnmp` versión 7.x (fork lextudio). El paquete original dejó de
 > mantenerse en la versión 4.x. Este proyecto usa la API `pysnmp.hlapi.v3arch.asyncio`.
