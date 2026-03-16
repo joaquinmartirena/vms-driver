@@ -600,11 +600,17 @@ class NTCIPDriver(VMSDriver):
         """
         from driver.graphics.payload import GraphicPayload, convert_image
 
-        # El VFC reporta 64449 en dmsGraphicBlockSize (.10.3.0), que en realidad
-        # es el max size del gráfico, no el tamaño por bloque. El block size real
-        # confirmado es 1023 — usar ese valor fijo para fragmentar el bitmap.
-        block_size = _GFX_BLOCK_SIZE
-        logger.debug("block size fijo", extra={"ip": self.ip, "block_size": block_size})
+        # Leer dmsGraphicBlockSize del panel.
+        # El VFC reporta 64449 (que es dmsGraphicMaxSize, no el blockSize real), así que
+        # cualquier valor > 4096 se descarta y se usa el fallback _GFX_BLOCK_SIZE=1023.
+        # Paneles estándar (ej. Fixalia) reportan el valor real (ej. 1024) y se usa directamente.
+        _GFX_BLOCK_SIZE_MAX_PLAUSIBLE = 4096
+        try:
+            reported = int(self._read.get(DMS_GRAPHIC_BLOCK_SIZE))
+            block_size = reported if 0 < reported <= _GFX_BLOCK_SIZE_MAX_PLAUSIBLE else _GFX_BLOCK_SIZE
+        except Exception:
+            block_size = _GFX_BLOCK_SIZE
+        logger.debug("block size", extra={"ip": self.ip, "block_size": block_size})
 
         target_w = width  if width  is not None else self._sign_width
         target_h = height if height is not None else self._sign_height
@@ -638,6 +644,10 @@ class NTCIPDriver(VMSDriver):
             except Exception:
                 pass
             time.sleep(0.3)
+        else:
+            raise TimeoutError(
+                f"El panel no entró en modifying(2) para el slot {slot} en 10s"
+            )
 
         for i, block in enumerate(payload.blocks, start=1):
             self._write.set(gfx_block_data(slot, i), OctetString(block))
