@@ -548,12 +548,22 @@ def send_graphic_menu(driver: VMSDriver):
         except ValueError:
             print("  * Ingresa un número.")
 
-    # Dimensiones personalizadas
-    print(f"  Dimensiones (panel completo: 144x96 px).")
-    raw_w = input("  Ancho en px [Enter=144]: ").strip()
-    raw_h = input("  Alto  en px [Enter=96]:  ").strip()
-    custom_width  = int(raw_w) if raw_w.isdigit() and int(raw_w) > 0 else None
-    custom_height = int(raw_h) if raw_h.isdigit() and int(raw_h) > 0 else None
+    # Dimensiones personalizadas — leer del panel
+    try:
+        dims = driver.get_sign_dimensions()
+        panel_w, panel_h = dims.width_pixels, dims.height_pixels
+    except Exception:
+        panel_w, panel_h = 0, 0
+
+    if panel_w and panel_h:
+        print(f"  Dimensiones del panel: {panel_w}×{panel_h} px.")
+    else:
+        print("  Dimensiones del panel: desconocidas.")
+
+    raw_w = input(f"  Ancho en px [Enter={panel_w or 'N/A'}]: ").strip()
+    raw_h = input(f"  Alto  en px [Enter={panel_h or 'N/A'}]: ").strip()
+    custom_width  = int(raw_w) if raw_w.isdigit() and int(raw_w) > 0 else (panel_w or None)
+    custom_height = int(raw_h) if raw_h.isdigit() and int(raw_h) > 0 else (panel_h or None)
 
     # Tipo de color
     print("  Tipo de color:")
@@ -578,7 +588,7 @@ def send_graphic_menu(driver: VMSDriver):
                                       width=custom_width, height=custom_height)
         print(f"  OK — {payload.width}x{payload.height}px | {payload.total_bytes} bytes | {len(payload.blocks)} bloques")
     except Exception as e:
-        print(f"  * Error: {e}")
+        print(f"  * Error ({type(e).__name__}): {e}")
         input("  [Enter para volver]")
         return
 
@@ -590,7 +600,7 @@ def send_graphic_menu(driver: VMSDriver):
             result = driver.send_message(f"[g{slot}]")
             print(f"  Activado — Slot mensaje: {result.slot}")
         except Exception as e:
-            print(f"  * Error activando: {e}")
+            print(f"  * Error activando ({type(e).__name__}): {e}")
 
     input("  [Enter para continuar]")
 

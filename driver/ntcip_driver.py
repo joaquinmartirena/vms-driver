@@ -38,7 +38,7 @@ from snmp.ntcip1203 import (
     SHORT_ERROR_STATUS, SHORT_ERROR_BITS, DMS_STAT_DOOR_OPEN, WATCHDOG_FAILURE_COUNT,
     msg_multi_string, msg_crc, msg_status,
     gfx_status, gfx_number, gfx_height, gfx_width, gfx_color_type, gfx_id, gfx_block_data,
-    DMS_GRAPHIC_BLOCK_SIZE, DMS_NUM_GRAPHICS, GFX_STATUS_COL,
+    DMS_GRAPHIC_BLOCK_SIZE, DMS_GRAPHIC_MAX_SIZE, DMS_NUM_GRAPHICS, GFX_STATUS_COL,
 )
 
 logger = logging.getLogger(__name__)
@@ -600,17 +600,26 @@ class NTCIPDriver(VMSDriver):
         """
         from driver.graphics.payload import GraphicPayload, convert_image
 
-        # Leer dmsGraphicBlockSize del panel.
-        # El VFC reporta 64449 (que es dmsGraphicMaxSize, no el blockSize real), así que
-        # cualquier valor > 4096 se descarta y se usa el fallback _GFX_BLOCK_SIZE=1023.
-        # Paneles estándar (ej. Fixalia) reportan el valor real (ej. 1024) y se usa directamente.
-        _GFX_BLOCK_SIZE_MAX_PLAUSIBLE = 4096
+        # Leer parámetros gráficos del panel via SNMP antes de calcular bloques.
         try:
-            reported = int(self._read.get(DMS_GRAPHIC_BLOCK_SIZE))
-            block_size = reported if 0 < reported <= _GFX_BLOCK_SIZE_MAX_PLAUSIBLE else _GFX_BLOCK_SIZE
+            max_entries = int(self._read.get(DMS_NUM_GRAPHICS))
+        except Exception:
+            max_entries = None
+
+        try:
+            max_size = int(self._read.get(DMS_GRAPHIC_MAX_SIZE))
+        except Exception:
+            max_size = None
+
+        try:
+            reported_bs = int(self._read.get(DMS_GRAPHIC_BLOCK_SIZE))
+            block_size = reported_bs if reported_bs > 0 else _GFX_BLOCK_SIZE
         except Exception:
             block_size = _GFX_BLOCK_SIZE
-        logger.debug("block size", extra={"ip": self.ip, "block_size": block_size})
+
+        logger.debug("parámetros gráficos del panel",
+                     extra={"ip": self.ip, "max_entries": max_entries,
+                            "max_size": max_size, "block_size": block_size})
 
         target_w = width  if width  is not None else self._sign_width
         target_h = height if height is not None else self._sign_height
@@ -618,6 +627,12 @@ class NTCIPDriver(VMSDriver):
             path, target_w, target_h,
             slot, block_size=block_size, color_type=color_type, crop=crop,
         )
+
+        if max_size is not None and payload.total_bytes > max_size:
+            raise ValueError(
+                f"La imagen ocupa {payload.total_bytes} bytes pero el panel soporta "
+                f"máximo {max_size} bytes por gráfico"
+            )
 
         # El VFC no soporta notUsedReq(6). Ir directo a modifyReq(7) desde
         # cualquier estado — el dispositivo acepta la transición.
@@ -650,7 +665,13 @@ class NTCIPDriver(VMSDriver):
             )
 
         for i, block in enumerate(payload.blocks, start=1):
-            self._write.set(gfx_block_data(slot, i), OctetString(block))
+            try:
+                self._write.set(gfx_block_data(slot, i), OctetString(block))
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Falló el envío del bloque {i}/{len(payload.blocks)} "
+                    f"(slot={slot}, bytes={len(block)}): {exc}"
+                ) from exc
             logger.debug("bloque gráfico enviado",
                          extra={"ip": self.ip, "slot": slot, "block": i})
             if _GFX_BLOCK_DELAY > 0:

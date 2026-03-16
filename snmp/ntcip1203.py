@@ -172,9 +172,11 @@ def msg_status(memory_type: int, slot: int) -> str:
 # dmsGraphicBitmapTable (dms.10.7.1.3.slot.block):
 #   col  3 = dmsGraphicBlockData — datos del bloque (OctetString, 1-based)
 # ═══════════════════════════════════════════════════════════════════════════════
-DMS_NUM_GRAPHICS       = f"{_BASE}.10.1.0"  # dmsNumGraphics      — cantidad de slots de gráficos disponibles
-DMS_GRAPHIC_MAX_SIZE   = f"{_BASE}.10.2.0"  # dmsGraphicMaxSize   — tamaño máximo de un gráfico en bytes
-DMS_GRAPHIC_BLOCK_SIZE = f"{_BASE}.10.3.0"  # dmsGraphicBlockSize — bytes por bloque (ej: 1023 en Daktronics VFC)
+DMS_NUM_GRAPHICS         = f"{_BASE}.10.1.0"  # dmsNumGraphics            — cantidad de slots de gráficos disponibles
+# .10.2.0 no existe en NTCIP 1203 v03
+DMS_GRAPHIC_MAX_SIZE     = f"{_BASE}.10.3.0"  # dmsGraphicMaxSize         — tamaño máximo de un gráfico en bytes
+DMS_GRAPHIC_AVAIL_MEMORY = f"{_BASE}.10.4.0"  # dmsGraphicAvailableMemory — memoria libre para gráficos (bytes)
+DMS_GRAPHIC_BLOCK_SIZE   = f"{_BASE}.10.5.0"  # dmsGraphicBlockSize       — bytes por bloque SNMP (ej: 1023 VFC, 1024 Fixalia)
 
 _GFX_TABLE = f"{_BASE}.10.6.1"
 _GFX_BLOCK = f"{_BASE}.10.7.1.3"
