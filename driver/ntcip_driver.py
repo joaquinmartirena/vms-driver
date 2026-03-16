@@ -22,19 +22,23 @@ from pysnmp.hlapi.v3arch.asyncio import OctetString
 from driver.base import VMSDriver
 from driver.multi import MultiValidator
 from driver.slots import SlotManager
-from models.device import DeviceStatus, Message, MessageStatus, ControlMode
+from models.device import DeviceStatus, DeviceInfo, GraphicInfo, Message, MessageStatus, ControlMode, SignDimensions, SignType, BrightnessStatus
 from snmp.client import SNMPClient
 from snmp.ntcip1203 import (
     SYS_DESCR,
     DMS_MAX_CHANGEABLE_MSG,
+    DMS_SIGN_HEIGHT, DMS_SIGN_WIDTH, DMS_SIGN_TYPE, DMS_SIGN_TECHNOLOGY,
+    DMS_ILLUM_CONTROL, DMS_ILLUM_NUM_BRIGHT_LEVELS, DMS_ILLUM_BRIGHT_LEVEL_STATUS,
+    DMS_ILLUM_MAN_LEVEL, DMS_ILLUM_LIGHT_OUTPUT_STATUS,
     VMS_SIGN_WIDTH_PIXELS, VMS_SIGN_HEIGHT_PIXELS,
+    VMS_CHARACTER_HEIGHT_PIXELS, VMS_CHARACTER_WIDTH_PIXELS,
     MULTI_MAX_MULTI_STRING_LENGTH, MULTI_MAX_NUMBER_PAGES, MULTI_SUPPORTED_MULTI_TAGS,
     DMS_ACTIVATE_MESSAGE,
     DMS_CONTROL_MODE,
-    SHORT_ERROR_STATUS, DMS_STAT_DOOR_OPEN, WATCHDOG_FAILURE_COUNT,
+    SHORT_ERROR_STATUS, SHORT_ERROR_BITS, DMS_STAT_DOOR_OPEN, WATCHDOG_FAILURE_COUNT,
     msg_multi_string, msg_crc, msg_status,
-    gfx_status, gfx_number, gfx_height, gfx_width, gfx_color_type, gfx_block_data,
-    DMS_GRAPHIC_BLOCK_SIZE, DMS_NUM_GRAPHICS,
+    gfx_status, gfx_number, gfx_height, gfx_width, gfx_color_type, gfx_id, gfx_block_data,
+    DMS_GRAPHIC_BLOCK_SIZE, DMS_NUM_GRAPHICS, GFX_STATUS_COL,
 )
 
 logger = logging.getLogger(__name__)
@@ -570,7 +574,7 @@ class NTCIPDriver(VMSDriver):
             return True
         except Exception as e:
             logger.error("error blankeando panel",
-                         extra={"ip": self.ip, "error": str(e)})
+                        extra={"ip": self.ip, "error": str(e)})
             return False
 
     def send_graphic(
@@ -579,6 +583,8 @@ class NTCIPDriver(VMSDriver):
         slot: int,
         color_type: int = 4,
         crop: str = "left",
+        width: int | None = None,
+        height: int | None = None,
     ) -> "GraphicPayload":
         """
         Sube una imagen al panel como gráfico NTCIP 1203.
@@ -600,8 +606,10 @@ class NTCIPDriver(VMSDriver):
         block_size = _GFX_BLOCK_SIZE
         logger.debug("block size fijo", extra={"ip": self.ip, "block_size": block_size})
 
+        target_w = width  if width  is not None else self._sign_width
+        target_h = height if height is not None else self._sign_height
         payload = convert_image(
-            path, self._sign_width, self._sign_height,
+            path, target_w, target_h,
             slot, block_size=block_size, color_type=color_type, crop=crop,
         )
 
@@ -655,6 +663,229 @@ class NTCIPDriver(VMSDriver):
                     extra={"ip": self.ip, "slot": slot,
                            "blocks": len(payload.blocks), "bytes": payload.total_bytes})
         return payload
+
+    def get_graphics(self) -> list[GraphicInfo]:
+        """
+        Devuelve los gráficos almacenados en la dmsGraphicTable.
+
+        Flujo optimizado (sin walk):
+          1. GET dmsNumGraphics → número de slots disponibles.
+          2. Batch GET de gfx_status(1..N) en grupos de 50 → descubrir slots activos.
+          3. Batch GET de las 6 columnas de todos los slots activos juntos.
+          4. Construir y retornar list[GraphicInfo].
+        """
+        # 1. Número de slots disponibles
+        try:
+            num_slots = int(self._read.get(DMS_NUM_GRAPHICS))
+        except Exception:
+            num_slots = 255  # fallback al máximo conocido del VFC
+
+        if num_slots == 0:
+            return []
+
+        # 2. Batch GET de la columna status para todos los slots
+        status_oids = [gfx_status(s) for s in range(1, num_slots + 1)]
+        try:
+            status_vals = self._read.get_many_batched(status_oids, batch_size=50)
+        except Exception as e:
+            logger.warning("error leyendo status de gráficos", extra={"ip": self.ip, "error": str(e)})
+            return []
+
+        active_slots = [
+            s for s, v in zip(range(1, num_slots + 1), status_vals)
+            if int(v) != 1  # 1 = notUsed
+        ]
+
+        if not active_slots:
+            return []
+
+        # 3. Batch GET de las 6 columnas de todos los slots activos
+        # OIDs en orden: por cada slot → [number, height, width, color_type, id, status]
+        detail_oids = []
+        for slot in active_slots:
+            detail_oids.extend([
+                gfx_number(slot),
+                gfx_height(slot),
+                gfx_width(slot),
+                gfx_color_type(slot),
+                gfx_id(slot),
+                gfx_status(slot),
+            ])
+
+        try:
+            detail_vals = self._read.get_many_batched(detail_oids, batch_size=50)
+        except Exception as e:
+            logger.warning("error leyendo detalles de gráficos", extra={"ip": self.ip, "error": str(e)})
+            return []
+
+        # 4. Reconstruir GraphicInfo (6 valores por slot, en el mismo orden)
+        graphics: list[GraphicInfo] = []
+        for i, slot in enumerate(active_slots):
+            base = i * 6
+            try:
+                graphics.append(GraphicInfo(
+                    slot=slot,
+                    number=int(detail_vals[base]),
+                    height=int(detail_vals[base + 1]),
+                    width=int(detail_vals[base + 2]),
+                    color_type=int(detail_vals[base + 3]),
+                    crc=int(detail_vals[base + 4]),
+                    status=int(detail_vals[base + 5]),
+                ))
+            except Exception as e:
+                logger.warning("error parseando gráfico",
+                               extra={"ip": self.ip, "slot": slot, "error": str(e)})
+                continue
+
+        logger.debug("gráficos leídos", extra={"ip": self.ip, "count": len(graphics)})
+        return graphics
+
+    def get_sign_dimensions(self) -> SignDimensions:
+        """
+        Lee las dimensiones del panel en un solo request SNMP multi-OID.
+
+        Orden de OIDs:
+            [0] vmsSignHeightPixels   — filas de píxeles
+            [1] vmsSignWidthPixels    — columnas de píxeles
+            [2] dmsSignHeight         — altura física (mm)
+            [3] dmsSignWidth          — anchura física (mm)
+            [4] vmsCharacterHeightPixels  (0 = variable / full-matrix)
+            [5] vmsCharacterWidthPixels   (0 = variable / full-matrix)
+        """
+        vals = self._read.get_many(
+            VMS_SIGN_HEIGHT_PIXELS,
+            VMS_SIGN_WIDTH_PIXELS,
+            DMS_SIGN_HEIGHT,
+            DMS_SIGN_WIDTH,
+            VMS_CHARACTER_HEIGHT_PIXELS,
+            VMS_CHARACTER_WIDTH_PIXELS,
+        )
+        return SignDimensions(
+            height_pixels=int(vals[0]),
+            width_pixels=int(vals[1]),
+            height_mm=int(vals[2]),
+            width_mm=int(vals[3]),
+            char_height_pixels=int(vals[4]),
+            char_width_pixels=int(vals[5]),
+        )
+
+    def get_device_info(self) -> DeviceInfo:
+        """
+        Lee información estática del dispositivo en un solo request SNMP multi-OID.
+
+        Orden de OIDs:
+            [0] dmsSignType         — tipo de panel (ver SignType enum)
+            [1] dmsSignTechnology   — bitmap de tecnología (bit1=LED, bit2=FlipDisk, bit3=FiberOptics, bit6=Drum)
+            [2] watchdogFailureCount — contador histórico de reinicios por watchdog
+        """
+        vals = self._read.get_many(
+            DMS_SIGN_TYPE,
+            DMS_SIGN_TECHNOLOGY,
+            WATCHDOG_FAILURE_COUNT,
+        )
+        try:
+            sign_type = SignType(int(vals[0]))
+        except ValueError:
+            sign_type = None
+
+        return DeviceInfo(
+            ip=self.ip,
+            port=self.port,
+            sign_type=sign_type,
+            sign_technology=int(vals[1]),
+            watchdog_failures=int(vals[2]),
+        )
+
+    def get_brightness(self) -> BrightnessStatus:
+        """
+        Lee el estado de iluminación del panel en un solo request SNMP multi-OID.
+
+        Orden de OIDs:
+            [0] dmsIllumControl           — modo activo
+            [1] dmsIllumNumBrightLevels   — niveles soportados
+            [2] dmsIllumBrightLevelStatus — nivel actual (read-only)
+            [3] dmsIllumLightOutputStatus — light output 0–65535 (read-only)
+        """
+        vals = self._read.get_many(
+            DMS_ILLUM_CONTROL,
+            DMS_ILLUM_NUM_BRIGHT_LEVELS,
+            DMS_ILLUM_BRIGHT_LEVEL_STATUS,
+            DMS_ILLUM_LIGHT_OUTPUT_STATUS,
+        )
+        return BrightnessStatus(
+            control_mode=int(vals[0]),
+            max_levels=int(vals[1]),
+            current_level=int(vals[2]),
+            light_output=int(vals[3]),
+        )
+
+    def set_brightness(self, level: int) -> None:
+        """
+        Pone el panel en modo manualIndexed y establece el nivel de brillo.
+
+        Secuencia NTCIP 1203:
+            1. GET dmsIllumNumBrightLevels → validar rango
+            2. SET dmsIllumControl = 4 (manualIndexed)
+            3. SET dmsIllumManLevel = level
+
+        Lanza ValueError si level está fuera de rango [1, max_levels].
+        """
+        max_levels = int(self._read.get(DMS_ILLUM_NUM_BRIGHT_LEVELS))
+        if not (1 <= level <= max_levels):
+            raise ValueError(
+                f"Nivel de brillo {level} fuera de rango [1, {max_levels}]"
+            )
+        self._write.set(DMS_ILLUM_CONTROL,   4)      # manualIndexed
+        self._write.set(DMS_ILLUM_MAN_LEVEL, level)
+        logger.info("brillo establecido",
+                    extra={"ip": self.ip, "level": level, "max_levels": max_levels})
+
+    def get_active_alarms(self) -> list[str]:
+        """
+        Lee shortErrorStatus y devuelve los nombres de los bits activos.
+
+        Devuelve lista vacía si no hay alarmas.
+        """
+        raw = int(self._read.get(SHORT_ERROR_STATUS))
+        return [name for bit, name in SHORT_ERROR_BITS.items() if raw & (1 << (bit - 1))]
+
+    def delete_graphic(self, slot: int) -> None:
+        """
+        Elimina un gráfico de la dmsGraphicTable.
+
+        Secuencia NTCIP 1203:
+            1. GET dmsGraphicStatus → verificar existencia y que no sea permanent (6)
+            2. SET dmsGraphicStatus = notUsedReq (9)
+            3. Poll hasta dmsGraphicStatus == notUsed (1)
+
+        Lanza ValueError si el slot es permanent.
+        Lanza TimeoutError si el panel no confirma notUsed en tiempo límite.
+        """
+        _GFX_DELETE_TIMEOUT  = 10.0  # s
+        _GFX_DELETE_INTERVAL = 0.3   # s
+
+        current = int(self._read.get(gfx_status(slot)))
+        if current == 6:  # permanent
+            raise ValueError(f"El gráfico en slot {slot} es permanent y no se puede borrar")
+
+        self._write.set(gfx_status(slot), 9)  # notUsedReq
+        logger.debug("notUsedReq enviado", extra={"ip": self.ip, "slot": slot})
+
+        deadline = time.time() + _GFX_DELETE_TIMEOUT
+        while time.time() < deadline:
+            try:
+                s = int(self._read.get(gfx_status(slot)))
+                if s == 1:  # notUsed
+                    logger.info("gráfico eliminado", extra={"ip": self.ip, "slot": slot})
+                    return
+            except Exception as e:
+                logger.warning("error leyendo status en poll delete_graphic",
+                               extra={"ip": self.ip, "slot": slot, "error": str(e)})
+            time.sleep(_GFX_DELETE_INTERVAL)
+
+        raise TimeoutError(
+            f"El panel no confirmó notUsed para el slot {slot} en {_GFX_DELETE_TIMEOUT}s"
+        )
 
     # ─── Métodos internos ─────────────────────────────────────────────────────
 

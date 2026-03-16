@@ -491,6 +491,37 @@ def delete_message_menu(driver: VMSDriver):
     input("  [Enter para continuar]")
 
 
+def list_graphics_menu(driver: VMSDriver):
+    """Lista los gráficos almacenados en la dmsGraphicTable del panel."""
+    print()
+    print("─── Gráficos en tabla (dmsGraphicTable) ────────────────")
+    STATUS_NAMES = {
+        1: "notUsed",
+        2: "modifying",
+        3: "calcID",
+        4: "readyForUse",
+        5: "inUse",
+        6: "permanent",
+    }
+    COLOR_TYPE_NAMES = {1: "mono1bit", 2: "mono4bit", 3: "colorClassic", 4: "color24bit"}
+    try:
+        graphics = driver.get_graphics()
+        if not graphics:
+            print("  (sin gráficos)")
+        else:
+            print(f"  {'Slot':<6} {'Num':<5} {'WxH':<12} {'Tipo':<12} {'Status':<14} {'CRC'}")
+            print(f"  {'────':<6} {'───':<5} {'───':<12} {'────':<12} {'──────':<14} {'───'}")
+            for g in sorted(graphics, key=lambda x: x.slot):
+                size_str = f"{g.width}x{g.height}"
+                ctype_str = COLOR_TYPE_NAMES.get(g.color_type, str(g.color_type))
+                status_str = STATUS_NAMES.get(g.status, str(g.status))
+                print(f"  {g.slot:<6} {g.number:<5} {size_str:<12} {ctype_str:<12} {status_str:<14} {g.crc}")
+    except Exception as e:
+        print(f"  * Error: {e}")
+    print()
+    input("  [Enter para volver]")
+
+
 def send_graphic_menu(driver: VMSDriver):
     """Sube una imagen al panel como gráfico NTCIP y opcionalmente la activa."""
     print()
@@ -517,6 +548,13 @@ def send_graphic_menu(driver: VMSDriver):
         except ValueError:
             print("  * Ingresa un número.")
 
+    # Dimensiones personalizadas
+    print(f"  Dimensiones (panel completo: 144x96 px).")
+    raw_w = input("  Ancho en px [Enter=144]: ").strip()
+    raw_h = input("  Alto  en px [Enter=96]:  ").strip()
+    custom_width  = int(raw_w) if raw_w.isdigit() and int(raw_w) > 0 else None
+    custom_height = int(raw_h) if raw_h.isdigit() and int(raw_h) > 0 else None
+
     # Tipo de color
     print("  Tipo de color:")
     print("    4) color24bit — 3 bytes/pixel BGR  * default")
@@ -536,7 +574,8 @@ def send_graphic_menu(driver: VMSDriver):
     print()
     print(f"  Subiendo imagen '{os.path.basename(path)}' → slot {slot} ({color_type=}, {crop=})...")
     try:
-        payload = driver.send_graphic(path, slot=slot, color_type=color_type, crop=crop)
+        payload = driver.send_graphic(path, slot=slot, color_type=color_type, crop=crop,
+                                      width=custom_width, height=custom_height)
         print(f"  OK — {payload.width}x{payload.height}px | {payload.total_bytes} bytes | {len(payload.blocks)} bloques")
     except Exception as e:
         print(f"  * Error: {e}")
@@ -552,6 +591,128 @@ def send_graphic_menu(driver: VMSDriver):
             print(f"  Activado — Slot mensaje: {result.slot}")
         except Exception as e:
             print(f"  * Error activando: {e}")
+
+    input("  [Enter para continuar]")
+
+
+def show_alarms_menu(driver):
+    """Muestra las alarmas activas según shortErrorStatus."""
+    print()
+    print("─── Alarmas activas (shortErrorStatus) ─────────────────")
+    try:
+        alarms = driver.get_active_alarms()
+        if not alarms:
+            print("  Sin alarmas activas.")
+        else:
+            for name in alarms:
+                print(f"  ⚠  {name}")
+    except Exception as e:
+        print(f"  * Error: {e}")
+    print()
+    input("  [Enter para volver]")
+
+
+def brightness_menu(driver):
+    """Muestra el estado de brillo y permite ajustarlo."""
+    print()
+    print("─── Brillo del panel ────────────────────────────────────")
+    CONTROL_NAMES = {2: "photocell", 3: "manual", 4: "manualIndexed"}
+    try:
+        b = driver.get_brightness()
+        mode_str = CONTROL_NAMES.get(b.control_mode, str(b.control_mode))
+        print(f"  Modo control:   {mode_str} ({b.control_mode})")
+        print(f"  Nivel actual:   {b.current_level} / {b.max_levels}")
+        print(f"  Light output:   {b.light_output} / 65535  ({b.light_output * 100 // 65535}%)")
+    except Exception as e:
+        print(f"  * Error leyendo brillo: {e}")
+        input("  [Enter para volver]")
+        return
+
+    print()
+    raw = input(f"  Ajustar nivel [1-{b.max_levels}] (Enter=cancelar): ").strip()
+    if not raw:
+        return
+    try:
+        level = int(raw)
+        driver.set_brightness(level)
+        print(f"  Brillo establecido en {level}")
+    except ValueError as e:
+        print(f"  * {e}")
+    except Exception as e:
+        print(f"  * Error: {e}")
+    input("  [Enter para continuar]")
+
+
+def device_info_menu(driver):
+    """Muestra info estática del dispositivo y dimensiones del panel."""
+    print()
+    print("─── Info del dispositivo ────────────────────────────────")
+    try:
+        info = driver.get_device_info()
+        sign_type_str = info.sign_type.name if info.sign_type else "desconocido"
+        tech = info.sign_technology
+        tech_bits = []
+        if tech & (1 << 0): tech_bits.append("LED")
+        if tech & (1 << 1): tech_bits.append("FlipDisk")
+        if tech & (1 << 2): tech_bits.append("FiberOptics")
+        if tech & (1 << 5): tech_bits.append("Drum")
+        tech_str = ", ".join(tech_bits) if tech_bits else f"bitmap={tech}"
+        print(f"  Tipo de panel:    {sign_type_str}")
+        print(f"  Tecnología:       {tech_str}")
+        print(f"  Watchdog resets:  {info.watchdog_failures}")
+    except Exception as e:
+        print(f"  * Error leyendo device info: {e}")
+
+    print()
+    print("─── Dimensiones del panel ───────────────────────────────")
+    try:
+        dims = driver.get_sign_dimensions()
+        char_w = dims.char_width_pixels if dims.char_width_pixels else "variable"
+        char_h = dims.char_height_pixels if dims.char_height_pixels else "variable"
+        print(f"  Píxeles:          {dims.width_pixels} x {dims.height_pixels} px")
+        print(f"  Físicas:          {dims.width_mm} x {dims.height_mm} mm")
+        print(f"  Char size:        {char_w} x {char_h} px")
+    except Exception as e:
+        print(f"  * Error leyendo dimensiones: {e}")
+
+    print()
+    input("  [Enter para volver]")
+
+
+def delete_graphic_menu(driver):
+    """Borra un gráfico de la dmsGraphicTable por slot."""
+    print()
+
+    # Mostrar gráficos existentes primero
+    try:
+        graphics = driver.get_graphics()
+        STATUS_NAMES = {1: "notUsed", 2: "modifying", 3: "calcID",
+                        4: "readyForUse", 5: "inUse", 6: "permanent"}
+        if not graphics:
+            print("  No hay gráficos en la tabla.")
+            input("  [Enter para volver]")
+            return
+        print("  Gráficos disponibles:")
+        for g in sorted(graphics, key=lambda x: x.slot):
+            status_str = STATUS_NAMES.get(g.status, str(g.status))
+            perm = " (no borrable)" if g.status == 6 else ""
+            print(f"    Slot {g.slot}: {g.width}x{g.height}px  {status_str}{perm}")
+    except Exception as e:
+        print(f"  * Error leyendo gráficos: {e}")
+
+    print()
+    raw = input("  Slot a borrar [Enter=cancelar]: ").strip()
+    if not raw:
+        return
+
+    try:
+        slot = int(raw)
+        driver.delete_graphic(slot)
+        print(f"  Gráfico slot {slot} eliminado.")
+    except (ValueError, TimeoutError) as e:
+        print(f"  * {e}")
+    except Exception as e:
+        print(f"  * Error: {e}")
 
     input("  [Enter para continuar]")
 
@@ -588,6 +749,11 @@ def main_menu(driver: VMSDriver, device_info: DeviceInfo):
         print("  5) Ver mensajes en tabla")
         print("  6) Borrar mensaje de tabla")
         print("  7) Subir grafico (imagen → panel)")
+        print("  8) Listar graficos en tabla")
+        print("  9) Borrar grafico de tabla")
+        print(" 10) Alarmas activas")
+        print(" 11) Brillo (ver / ajustar)")
+        print(" 12) Info del dispositivo y dimensiones")
         print("  0) Salir")
         print()
 
@@ -647,6 +813,21 @@ def main_menu(driver: VMSDriver, device_info: DeviceInfo):
 
         elif opcion == "7":
             send_graphic_menu(driver)
+
+        elif opcion == "8":
+            list_graphics_menu(driver)
+
+        elif opcion == "9":
+            delete_graphic_menu(driver)
+
+        elif opcion == "10":
+            show_alarms_menu(driver)
+
+        elif opcion == "11":
+            brightness_menu(driver)
+
+        elif opcion == "12":
+            device_info_menu(driver)
 
         elif opcion == "0":
             print("\n  Hasta luego.\n")

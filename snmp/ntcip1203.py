@@ -85,6 +85,15 @@ DMS_MSG_RUN_TIME_PRIORITY        = f"{_MSG_TABLE}.8"  # dmsMessageRunTimePriorit
 DMS_MSG_STATUS                   = f"{_MSG_TABLE}.9"  # dmsMessageStatus           — estado del slot (ver MessageStatus enum)
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# dmsIllum (dms.7) — Iluminación del panel
+# ═══════════════════════════════════════════════════════════════════════════════
+DMS_ILLUM_CONTROL                = f"{_BASE}.7.1.0"   # dmsIllumControl           — modo (1=other,2=photocell,3=manual,4=manualIndexed)
+DMS_ILLUM_NUM_BRIGHT_LEVELS      = f"{_BASE}.7.4.0"   # dmsIllumNumBrightLevels   — cantidad de niveles soportados
+DMS_ILLUM_BRIGHT_LEVEL_STATUS    = f"{_BASE}.7.5.0"   # dmsIllumBrightLevelStatus — nivel actual (read-only)
+DMS_ILLUM_MAN_LEVEL              = f"{_BASE}.7.6.0"   # dmsIllumManLevel          — nivel manual (read-write)
+DMS_ILLUM_LIGHT_OUTPUT_STATUS    = f"{_BASE}.7.9.0"   # dmsIllumLightOutputStatus — light output actual 0–65535 (read-only)
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # signControl (dms.6) — Control del panel
 # ═══════════════════════════════════════════════════════════════════════════════
 DMS_CONTROL_MODE                 = f"{_BASE}.6.1.0"   # dmsControlMode       — modo de control activo (2=local,4=central,5=centralOverride)
@@ -101,6 +110,23 @@ DMS_CURRENT_SPEED                = f"{_BASE}.9.3.0"   # dmsCurrentSpeed         
 WATCHDOG_FAILURE_COUNT           = f"{_BASE}.9.5.0"   # watchdogFailureCount    — contador histórico de reinicios por watchdog
 DMS_STAT_DOOR_OPEN               = f"{_BASE}.9.6.0"   # dmsStatDoorOpen         — puertas del gabinete abiertas (bitmap, 0=todas cerradas)
 SHORT_ERROR_STATUS               = f"{_BASE}.9.7.1.0" # shortErrorStatus        — bitmap de errores activos (ver ShortErrorBit enum)
+
+SHORT_ERROR_BITS = {
+    1:  "COMMUNICATIONS",
+    2:  "POWER",
+    3:  "ATTACHED_DEVICE",
+    4:  "LAMP",
+    5:  "PIXEL",
+    6:  "PHOTOCELL",
+    7:  "MESSAGE",
+    8:  "CONTROLLER",
+    9:  "TEMPERATURE_WARNING",
+    10: "CLIMATE_CONTROL",
+    11: "CRITICAL_TEMPERATURE",
+    12: "DRUM_ROTOR",
+    13: "DOOR_OPEN",
+    14: "HUMIDITY",
+}
 CONTROLLER_ERROR_STATUS          = f"{_BASE}.9.7.2.0" # controllerErrorStatus   — errores del controlador (0=ninguno)
 DMS_PIXEL_FAILURE_TEST_ROWS      = f"{_BASE}.9.7.19.0"# dmsPixelFailureTestRows    — píxeles fallados en test (0=ninguno)
 DMS_PIXEL_FAILURE_MESSAGE_ROWS   = f"{_BASE}.9.7.20.0"# dmsPixelFailureMessageRows — píxeles fallados en display (0=ninguno)
@@ -174,6 +200,13 @@ def gfx_color_type(slot: int) -> str:
     """OID de dmsGraphicType para el slot dado."""
     return f"{_GFX_TABLE}.6.{slot}"
 
+def gfx_id(slot: int) -> str:
+    """OID de dmsGraphicID (col 7 — CRC calculado por el panel) para el slot dado."""
+    return f"{_GFX_TABLE}.7.{slot}"
+
 def gfx_block_data(slot: int, i: int) -> str:
     """OID de dmsGraphicBlockData para el slot y bloque i (1-based)."""
     return f"{_GFX_BLOCK}.{slot}.{i}"
+
+# Columna de status sin instancia — usar como base para walk
+GFX_STATUS_COL = f"{_GFX_TABLE}.10"
